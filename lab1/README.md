@@ -6,6 +6,7 @@
 
 ## Содержание
 
+- [Как запустить проект](#как-запустить-проект)
 - [Быстрый старт](#быстрый-старт)
 - [Часть I. ПРАКТИКА](#часть-i-практика)
   - [Установка инструментов (Arch Linux ARM64)](#установка-инструментов-arch-linux-arm64)
@@ -25,7 +26,92 @@
   - [Как из C вызвать C#-код и наоборот](#как-из-c-вызвать-c-код-и-наоборот)
   - [Вопросы преподавателя и ответы](#вопросы-преподавателя-и-ответы)
 
-> **Для показа на защите** — файл `КОМАНДЫ.md`: готовые команды с ожидаемым выводом.
+> **Для показа на защите**
+> - Linux: `ДЕМОНСТРАЦИЯ.md` — готовые команды с пояснениями к ключам
+> - Windows: `ДЕМОНСТРАЦИЯ-WINDOWS.md` — то же самое для Visual Studio
+> - Разбор типовых ошибок: `ДЕМОНСТРАЦИЯ.md`, раздел «Ошибки»
+
+---
+
+# Как запустить проект
+
+Обе части проверялись на живой машине: Windows 11 ARM64 и Arch Linux ARM64.
+Все пути ниже — фактические, из рабочей сборки.
+
+## Windows — через Visual Studio
+
+Файл решения: `lab1/windows/lab1.sln`. Открыть двойным кликом.
+
+**Перед первой сборкой** выбери платформу: панель сверху, где написано `Debug` →
+выпадающий список → **ARM64**. По умолчанию Visual Studio ставит `x64`, а проекты
+собраны под `ARM64`.
+
+Собрать всё сразу: **Build → Build Solution** (`Ctrl+Shift+B`). Соберутся пять
+проектов: `SP` (библиотека), `SP_01`, `SP_02`, `SP_05`, `SP_06`. Порядок сборки
+подхватится сам через `ProjectReference`.
+
+Запустить: правый клик по проекту → **Set as Startup Project** → `Ctrl+F5`.
+
+### Что где лежит после сборки
+
+| Что | Путь |
+|---|---|
+| `SP.dll` + `SP.lib` | `windows\SP_lib\SP\ARM64\Release\` |
+| `SP_01.exe` + `SP.dll` | `windows\SP_01\SP_01\ARM64\Release\` |
+| `SP_02.exe` + `SP.dll` | `windows\SP_02\SP_02\ARM64\Release\` |
+| `SP_05.exe` + `SP.dll` | `windows\cs\SP_05\bin\Release\net10.0\win-arm64\` |
+| `SP_06.exe` + `SP.dll` | `windows\cs\SP_06\bin\Release\net10.0\win-arm64\` |
+
+`SP.dll` копируется сам при сборке — специально ничего делать не нужно.
+
+> C#-проекты собраны под `net10.0`, потому что на машине стоит SDK `10.0.401`.
+> Linux-проекты остались на `net8.0` — там SDK `8.0.425`.
+
+### Запуск из командной строки
+
+Открой `View → Terminal` в Visual Studio, папка `Command Prompt`:
+
+```cmd
+windows\SP_01\SP_01\ARM64\Release\SP_01.exe
+windows\SP_02\SP_02\ARM64\Release\SP_02.exe
+windows\cs\SP_05\bin\Release\net10.0\win-arm64\SP_05.exe
+windows\cs\SP_06\bin\Release\net10.0\win-arm64\SP_06.exe
+```
+
+Если кириллица в выводе — кракозябры, переключи кодировку:
+
+```cmd
+chcp 65001
+```
+
+## Linux — через терминал
+
+Рабочая папка: `lab1/`. В новом терминале один раз:
+
+```bash
+export DOTNET_ROOT="$HOME/.dotnet"; export PATH="$HOME/.dotnet:$PATH"
+```
+
+Полные команды — в файле `ДЕМОНСТРАЦИЯ.md`, по блоку на задание.
+Коротко — всё сразу:
+
+```bash
+export DOTNET_ROOT="$HOME/.dotnet"; export PATH="$HOME/.dotnet:$PATH"
+L=~/Documents/VisualStudioCodeRepos/SystemProgramming/lab1
+
+(cd $L/linux/SP_lib && g++ -fPIC -shared SP.cpp -o SP.so)
+
+(cd $L/linux/SP_03 && cp ../SP_lib/SP.so . && g++ main.cpp SP.so -o SP_03 && LD_LIBRARY_PATH=. ./SP_03)
+
+(cd $L/linux/SP_04 && cp ../SP_lib/SP.so . && g++ main.cpp -ldl -o SP_04 && ./SP_04)
+
+(cd $L/linux/cs/SP_07 && dotnet publish -c Release -r linux-arm64 --self-contained true -p:PublishSingleFile=true -v q --nologo && cd bin/Release/net8.0/linux-arm64/publish && cp $L/linux/SP_lib/SP.so . && ./SP_07)
+
+(cd $L/linux/cs/SP_08 && dotnet publish -c Release -r linux-arm64 --self-contained true -p:PublishSingleFile=true -v q --nologo && cd bin/Release/net8.0/linux-arm64/publish && cp $L/linux/SP_lib/SP.so . && ./SP_08)
+```
+
+Ждёт сборки всех четырёх Linux-заданий: `SP_03`, `SP_04`, `SP_07`, `SP_08`.
+У всех результат `15`, `5`, `50`, `2`. Займёт ~2 минуты, первый `dotnet publish` дольше.
 
 ---
 
@@ -189,9 +275,9 @@ Header`, **не меняй**. В шаблоне проекта DLL уже ест
 
 **Шаг 3.** Замени содержимое `SP.cpp` кодом из раздела «Код, который нужен везде».
 
-**Шаг 4.** `Build → Build Solution`. В `x64\Debug` появятся **`SP.dll`** (п. 1 ТЗ)
+**Шаг 4.** `Build → Build Solution`. В `SP_lib\SP\ARM64\Release\` появятся **`SP.dll`** и **`SP.lib`** (п. 1 ТЗ)
 и **`SP.lib`** (п. 2 ТЗ — библиотека импорта). Проверить экспорты:
-`Project → Outputs → View → Module Viewer` или `dumpbin /exports SP\x64\Debug\SP.dll`.
+`Project → Outputs → View → Module Viewer` или `dumpbin /exports SP_lib\SP\ARM64\Release\SP.dll`.
 
 **Шаг 5.** `New Project → C++ → Console App`, имя `SP_01`. Код `main.cpp`:
 
@@ -217,11 +303,11 @@ int main(int argc, char* argv[])
 **Шаг 6.** Свойства проекта `SP_01`:
 
 ```
-Linker → General → Additional Library Directories:  ..\SP\x64\Debug
+Linker → General → Additional Library Directories:  ..\SP_lib\SP\ARM64\Release
 Linker → Input → Additional Dependencies:          SP.lib
 ```
 
-**Шаг 7.** Скопируй `SP.dll` в `SP_01\x64\Debug\`.
+**Шаг 7.** `Build Solution` — `SP.dll` скопируется в `SP_01\SP_01\ARM64\Release\` автоматически.
 
 **Шаг 8.** `Ctrl+F5`:
 
@@ -281,7 +367,7 @@ int main(int argc, char* argv[])
 }
 ```
 
-**Шаг 2.** Скопируй `SP.dll` в `SP_02\x64\Debug\`. **Настройки линковки не нужны** —
+**Шаг 2.** `Build Solution` — `SP.dll` скопируется в `SP_02\SP_02\ARM64\Release\` автоматически. **Настройки линковки не нужны** —
 в этом суть задания: библиотека не упоминается ни в одном свойстве проекта.
 
 **Шаг 3.** `Ctrl+F5`:
@@ -340,7 +426,7 @@ internal class Program
 }
 ```
 
-**Шаг 2.** Скопируй `SP.dll` в `SP_05\bin\Debug\net8.0\` рядом со `SP_05.exe`.
+**Шаг 2.** `Build Solution` — `SP.dll` скопируется в `cs\SP_05\bin\Release\net10.0\win-arm64\` рядом со `SP_05.exe`.
 
 **Шаг 3.** `Ctrl+F5`:
 
@@ -394,7 +480,7 @@ internal class Program
 }
 ```
 
-**Шаг 2.** Скопируй `SP.dll` в `SP_06\bin\Debug\net8.0\`.
+**Шаг 2.** `Build Solution` — `SP.dll` скопируется в `cs\SP_06\bin\Release\net10.0\win-arm64\` автоматически.
 
 **Шаг 3.** `Ctrl+F5`. Вывод такой же, как у `SP_05`.
 
@@ -415,7 +501,7 @@ internal class Program
 **Шаг 1.** Собрать библиотеку:
 
 ```bash
-cd ~/lab1/linux/SP_lib
+cd ~/Documents/VisualStudioCodeRepos/SystemProgramming/lab1/linux/SP_lib
 
 g++ -c SP.cpp -o SP.o
 g++ -shared SP.o -o SP.so
@@ -439,7 +525,7 @@ nm -D SP.so | grep -E ' T (sum|sub|mul|div)$'
 **Шаг 2.** Собрать приложение:
 
 ```bash
-cd ~/lab1/linux/SP_03
+cd ~/Documents/VisualStudioCodeRepos/SystemProgramming/lab1/linux/SP_03
 cp ../SP_lib/SP.so .
 g++ main.cpp SP.so -o SP_03
 ```
@@ -495,14 +581,14 @@ div(10, 5)  = 2
 **Шаг 1.**
 
 ```bash
-cd ~/lab1/linux/SP_lib
+cd ~/Documents/VisualStudioCodeRepos/SystemProgramming/lab1/linux/SP_lib
 g++ -fPIC -shared SP.cpp -o SP.so
 ```
 
 **Шаг 2.** Собрать приложение:
 
 ```bash
-cd ~/lab1/linux/SP_04
+cd ~/Documents/VisualStudioCodeRepos/SystemProgramming/lab1/linux/SP_04
 cp ../SP_lib/SP.so .
 g++ main.cpp -ldl -o SP_04
 ```
@@ -581,7 +667,7 @@ div(10, 5)  = 2
 export DOTNET_ROOT="$HOME/.dotnet"
 export PATH="$HOME/.dotnet:$PATH"
 
-cd ~/lab1/linux/cs/SP_07
+cd ~/Documents/VisualStudioCodeRepos/SystemProgramming/lab1/linux/cs/SP_07
 dotnet publish -c Release -r linux-arm64 --self-contained true -p:PublishSingleFile=true
 ```
 
@@ -616,7 +702,7 @@ cd bin/Release/net8.0/linux-arm64/publish
 **Шаг 1.**
 
 ```bash
-cd ~/lab1/linux/cs/SP_08
+cd ~/Documents/VisualStudioCodeRepos/SystemProgramming/lab1/linux/cs/SP_08
 dotnet publish -c Release -r linux-arm64 --self-contained true -p:PublishSingleFile=true
 ```
 
@@ -677,11 +763,11 @@ internal class Program
 
 ## Одна команда вместо всех шагов
 
-`build_linux.sh` собирает и запускает задания 03, 04, 07, 08 подряд:
+Блок из файла `ДЕМОНСТРАЦИЯ.md`, раздел «03 + 04 + 07 + 08 одним блоком», собирает и запускает все четыре задания подряд:
 
 ```bash
 export DOTNET_ROOT="$HOME/.dotnet"; export PATH="$HOME/.dotnet:$PATH"
-cd ~/lab1 && bash build_linux.sh
+cd ~/Documents/VisualStudioCodeRepos/SystemProgramming/lab1
 ```
 
 ---
@@ -916,13 +1002,14 @@ Windows: `dumpbin /exports SP.dll`. Linux: `nm -D SP.so | grep ' T '`.
 
 ## Порядок демонстрации
 
-1. **Задание 01:** скриншот, что в `x64\Debug` появились `SP.dll` и `SP.lib`
-   + вывод `SP_01.exe`.
-2. **Задание 02:** вывод `SP_02.exe` + пустые настройки линковки (сравнение с 01).
+1. **Задание 01:** вывод `SP_01.exe` + `dumpbin /dependents SP_01.exe`,
+   где `SP.dll` **есть** в списке.
+2. **Задание 02:** вывод `SP_02.exe` + `dumpbin /dependents SP_02.exe`,
+   где `SP.dll` **нет** — контраст с заданием 01.
 3. **Задания 03/04:** `g++ -shared` → `nm -D SP.so` → `readelf -d SP_03`
    (есть `SP.so`) → запуск `SP_03` → `readelf -d SP_04` (**нет** `SP.so`)
    → `./SP_04`.
 4. **Задания 05–08:** выводы `SP_05`, `SP_06` на Windows и `SP_07`, `SP_08` на Linux.
 5. **Вопросы** — раздел выше.
 
-Готовые команды с ожидаемым выводом — в `КОМАНДЫ.md`.
+Готовые команды с ожидаемым выводом — в `ДЕМОНСТРАЦИЯ.md` (Linux) и `ДЕМОНСТРАЦИЯ-WINDOWS.md` (Windows).

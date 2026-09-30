@@ -2,6 +2,13 @@
 
 В Visual Studio часть работы — мышью, но весь код и все команды — чистыми блоками, копируются целиком.
 
+**Открой `lab1/windows/lab1.sln`** — в нём все пять проектов. Не открывай
+`.vcxproj` по отдельности: без решения Visual Studio не подхватит зависимости.
+
+**Перед первой сборкой** выбери платформу ARM64: панель сверху, где написано
+`Debug` → выпадающий список → **ARM64**. По умолчанию там стоит `x64`, а проекты
+собраны под `ARM64` — при `x64` сборка упадёт.
+
 Сначала подготовка (один раз), потом каждое задание.
 
 ---
@@ -128,26 +135,24 @@ Build → Build Solution
 Открыть `View → Terminal`, выбрать `Command Prompt`. Из корня решения `SP_01`:
 
 ```cmd
-xcopy ..\SP\x64\Debug\SP.dll x64\Debug\ /Y
-```
-
-```cmd
-x64\Debug\SP_01.exe
+SP_01\SP_01\ARM64\Release\SP_01.exe
 ```
 
 | Ключ | Значение |
 |---|---|
-| `xcopy` | копирование файлов в Windows |
-| `..\SP\x64\Debug\SP.dll` | путь к библиотеке — на уровень выше, в папку проекта `SP`, конфигурация `x64`, режим `Debug` |
-| `x64\Debug\` | куда копируем — в папку вывода приложения |
-| `/Y` | не спрашивать «перезаписать файл», если он уже есть |
+| `SP_01\SP_01\` | вложенная папка по имени проекта — MSBuild добавляет её сам в `OutDir` |
+| `ARM64\Release\` | платформа и конфигурация сборки |
+| `dumpbin /dependents` | утилита Visual Studio, показывает список DLL от которых зависит exe |
+
+`SP.dll` копируется в эту папку **автоматически** при сборке — отдельной
+командой копировать не нужно.
 
 **Ожидаем:** `sum = 15`, `sub = 5`, `mul = 50`, `div = 2`
 
 ### Шаг 5. Доказательство для преподавателя
 
 ```cmd
-dumpbin /dependents x64\Debug\SP_01.exe
+dumpbin /dependents SP_01\SP_01\ARM64\Release\SP_01.exe
 ```
 
 | Ключ | Значение |
@@ -232,19 +237,17 @@ Build → Build Solution
 ```
 
 ```cmd
-xcopy ..\SP\x64\Debug\SP.dll x64\Debug\ /Y
+SP_02\SP_02\ARM64\Release\SP_02.exe
 ```
 
-```cmd
-x64\Debug\SP_02.exe
-```
+`SP.dll` копируется в папку вывода автоматически при сборке.
 
 **Ожидаем:** `sum = 15`, `sub = 5`, `mul = 50`, `div = 2`
 
 ### Шаг 5. Доказательство для преподавателя
 
 ```cmd
-dumpbin /dependents x64\Debug\SP_02.exe
+dumpbin /dependents SP_02\SP_02\ARM64\Release\SP_02.exe
 ```
 
 `SP.dll` в списке **отсутствует**. В отличие от задания 01 — библиотеки в бинарнике нет, программа грузит её сама в момент работы. Это главное доказательство динамической линковки.
@@ -309,16 +312,15 @@ Build → Build Solution
 ```
 
 ```cmd
-xcopy ..\SP\x64\Debug\SP.dll bin\Debug\net8.0\ /Y
-```
-
-```cmd
-bin\Debug\net8.0\SP_05.exe
+cs\SP_05\bin\Release\net10.0\win-arm64\SP_05.exe
 ```
 
 | Ключ | Значение |
 |---|---|
-| `bin\Debug\net8.0\` | папка вывода .NET-приложения. Имя зависит от версии фреймворка — для `.NET 8.0` это именно `net8.0` |
+| `bin\Release\` | папка вывода, конфигурация `Release` |
+| `net10.0` | целевой фреймворк — берётся из `<TargetFramework>` в `.csproj` |
+| `win-arm64` | появляется при сборке с `-r win-arm64 --self-contained true` |
+| `chcp 65001` | если кириллица в выводе — кракозябры, эта команда переключает кодировку терминала на UTF-8 |
 
 **Ожидаем:** `Сложение = 15`, `Вычитание = 5`, `Умножение = 50`, `Деление = 2`
 
@@ -386,11 +388,7 @@ Build → Build Solution
 ```
 
 ```cmd
-xcopy ..\SP\x64\Debug\SP.dll bin\Debug\net8.0\ /Y
-```
-
-```cmd
-bin\Debug\net8.0\SP_06.exe
+cs\SP_06\bin\Release\net10.0\win-arm64\SP_06.exe
 ```
 
 **Ожидаем:** `Сложение = 15`, `Вычитание = 5`, `Умножение = 50`, `Деление = 2`
@@ -413,14 +411,16 @@ bin\Debug\net8.0\SP_06.exe
 
 | Симптом | Причина | Что делать |
 |---|---|---|
-| `0xc0000135 STATUS_DLL_NOT_FOUND` | DLL не рядом с `.exe` | `xcopy ..\SP\x64\Debug\SP.dll x64\Debug\ /Y` |
-| `LNK2001: unresolved external symbol sum` | нет линковки или пуст `SP.def` | задание 01: проверить `Additional Dependencies`; библиотека: заполнить `SP.def` |
-| `LNK1112: library not found` | неверный путь | проверить `Additional Library Directories` |
-| `LoadLibrary FAILED, error = 126` | DLL нет в папке программы | та же команда `xcopy` |
+| `0xc0000135 STATUS_DLL_NOT_FOUND` | DLL не рядом с `.exe` | пересобери — `SP.dll` копируется автоматически |
+| `LNK2001: unresolved external symbol sum` | нет линковки или пуст `SP.def` | задание 01: проверь `ProjectReference` на `SP.vcxproj`; библиотека: заполни `SP.def` |
+| `LNK1112: library not found` | неверный путь к `.lib` | проверь `Additional Library Directories` |
+| `LoadLibrary FAILED, error = 126` | DLL нет в папке программы | та же сборка, что и выше |
 | `GetProcAddress FAILED` | функция не экспортирована | проверь `EXPORT` в `SP.cpp` и `SP.def` |
-| `DllNotFoundException` в C# | DLL не скопирована в папку вывода | `xcopy ..\SP\x64\Debug\SP.dll bin\Debug\net8.0\ /Y` |
+| `DllNotFoundException` в C# | DLL не скопирована в папку вывода | пересобери проект — таргет `CopySPLib` копирует DLL сам |
 | `AccessViolationException` | не указано соглашение о вызовах | добавить `CallingConvention.Cdecl` |
-| `fatal error C1010: precompiled header not found` | в `SP.cpp` нет `#include "pch.h"` | вернуть первую строку или отключить PCH в свойствах проекта |
+| `error MSB8020: средств сборки не найдено` | в проекте указан чужой тулсет | в `.vcxproj` должно быть `<PlatformToolset>v145</PlatformToolset>` |
+| `error C2169: div — подставляемая функция` | имя `div` занято в CRT | функция в `SP.cpp` называется `div_int`, экспорт `div` идёт через алиас в `SP.def` |
+| `fatal error C1010: precompiled header not found` | в `SP.cpp` нет `#include "pch.h"` | вернуть первую строку или отключить PCH в свойствах |
 
 ---
 

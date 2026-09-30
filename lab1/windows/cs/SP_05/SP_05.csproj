@@ -6,4 +6,25 @@
     <Nullable>disable</Nullable>
   </PropertyGroup>
 
+  <!--
+    Copy the native SP.dll next to the built exe so P/Invoke can find it.
+    $(Platform) is AnyCPU for C# projects, so the native output dir is
+    searched explicitly. First existing candidate wins.
+  -->
+  <PropertyGroup>
+    <SPLibRelDir1>..\..\SP_lib\SP\ARM64\Release\SP.dll</SPLibRelDir1>
+    <SPLibRelDir2>..\..\SP_lib\bin\ARM64\Release\SP.dll</SPLibRelDir2>
+    <SPLibRelDir3>..\..\SP_lib\bin\Release\SP.dll</SPLibRelDir3>
+  </PropertyGroup>
+
+  <Target Name="CopySPLib" AfterTargets="Build">
+    <PropertyGroup>
+      <SPLibPath Condition="'$(SPLibPath)' == '' And Exists('$(SPLibRelDir1)')">$(SPLibRelDir1)</SPLibPath>
+      <SPLibPath Condition="'$(SPLibPath)' == '' And Exists('$(SPLibRelDir2)')">$(SPLibRelDir2)</SPLibPath>
+      <SPLibPath Condition="'$(SPLibPath)' == '' And Exists('$(SPLibRelDir3)')">$(SPLibRelDir3)</SPLibPath>
+    </PropertyGroup>
+    <Copy SourceFiles="$(SPLibPath)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="'$(SPLibPath)' != ''" />
+    <Warning Text="SP.dll not found (checked $(SPLibRelDir1), $(SPLibRelDir2), $(SPLibRelDir3)) - native library was not copied." Condition="'$(SPLibPath)' == ''" />
+  </Target>
+
 </Project>

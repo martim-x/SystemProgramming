@@ -21,10 +21,12 @@
     <ConfigurationType>Application</ConfigurationType>
     <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
+    <UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries>
+    <PlatformToolset Condition="'$(Configuration)'=='Debug'">v145</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <PropertyGroup>
-    <OutDir>$(MSBuildThisFileDirectory)bin\$(Platform)\$(Configuration)\</OutDir>
+    <OutDir>$(MSBuildThisFileDirectory)$(ProjectName)\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(MSBuildThisFileDirectory)obj\$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup>
@@ -34,6 +36,9 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <!-- /Oi- : "div" is an MSVC intrinsic returning div_t; our extern "C" int div(int,int)
+           from SP.dll must be treated as a plain external function. -->
+      <IntrinsicFunctions>false</IntrinsicFunctions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -42,10 +47,20 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
   </ItemGroup>
+  <!-- Static linking: the ProjectReference supplies the SP.lib import-library search path,
+       the build order, and links SP.lib into SP_01.exe (so SP.dll shows up in the
+       import table - that is the whole point of this lab variant). -->
   <ItemGroup>
     <ProjectReference Include="..\SP_lib\SP.vcxproj">
       <Project>{1A7C4E20-0B31-4C7D-9E11-000000000000}</Project>
     </ProjectReference>
   </ItemGroup>
+  <!-- Put SP.dll next to SP_01.exe so the loader can resolve the static import. -->
+  <Target Name="CopySPDllToOutDir" AfterTargets="Build">
+    <ItemGroup>
+      <SPDllSource Include="$(MSBuildThisFileDirectory)..\SP_lib\SP\$(Platform)\$(Configuration)\SP.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(SPDllSource)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="Exists('%(SPDllSource.Identity)')" />
+  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

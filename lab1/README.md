@@ -59,8 +59,8 @@
 | `SP.dll` + `SP.lib` | `windows\SP_lib\SP\ARM64\Release\` |
 | `SP_01.exe` + `SP.dll` | `windows\SP_01\SP_01\ARM64\Release\` |
 | `SP_02.exe` + `SP.dll` | `windows\SP_02\SP_02\ARM64\Release\` |
-| `SP_05.exe` + `SP.dll` | `windows\cs\SP_05\bin\Release\net10.0\win-arm64\` |
-| `SP_06.exe` + `SP.dll` | `windows\cs\SP_06\bin\Release\net10.0\win-arm64\` |
+| `SP_05.exe` + `SP.dll` | `windows\cs\SP_05\bin\Release\net10.0\` |
+| `SP_06.exe` + `SP.dll` | `windows\cs\SP_06\bin\Release\net10.0\` |
 
 `SP.dll` копируется сам при сборке — специально ничего делать не нужно.
 
@@ -74,8 +74,8 @@
 ```cmd
 windows\SP_01\SP_01\ARM64\Release\SP_01.exe
 windows\SP_02\SP_02\ARM64\Release\SP_02.exe
-windows\cs\SP_05\bin\Release\net10.0\win-arm64\SP_05.exe
-windows\cs\SP_06\bin\Release\net10.0\win-arm64\SP_06.exe
+windows\cs\SP_05\bin\Release\net10.0\SP_05.exe
+windows\cs\SP_06\bin\Release\net10.0\SP_06.exe
 ```
 
 Если кириллица в выводе — кракозябры, переключи кодировку:
@@ -426,7 +426,7 @@ internal class Program
 }
 ```
 
-**Шаг 2.** `Build Solution` — `SP.dll` скопируется в `cs\SP_05\bin\Release\net10.0\win-arm64\` рядом со `SP_05.exe`.
+**Шаг 2.** `Build Solution` — `SP.dll` скопируется в `cs\SP_05\bin\Release\net10.0\` рядом со `SP_05.exe`.
 
 **Шаг 3.** `Ctrl+F5`:
 
@@ -480,7 +480,7 @@ internal class Program
 }
 ```
 
-**Шаг 2.** `Build Solution` — `SP.dll` скопируется в `cs\SP_06\bin\Release\net10.0\win-arm64\` автоматически.
+**Шаг 2.** `Build Solution` — `SP.dll` скопируется в `cs\SP_06\bin\Release\net10.0\` автоматически.
 
 **Шаг 3.** `Ctrl+F5`. Вывод такой же, как у `SP_05`.
 

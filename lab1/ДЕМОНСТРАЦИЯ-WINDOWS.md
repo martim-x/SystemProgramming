@@ -312,14 +312,14 @@ Build → Build Solution
 ```
 
 ```cmd
-cs\SP_05\bin\Release\net10.0\win-arm64\SP_05.exe
+cs\SP_05\bin\Release\net10.0\SP_05.exe
 ```
 
 | Ключ | Значение |
 |---|---|
 | `bin\Release\` | папка вывода, конфигурация `Release` |
 | `net10.0` | целевой фреймворк — берётся из `<TargetFramework>` в `.csproj` |
-| `win-arm64` | появляется при сборке с `-r win-arm64 --self-contained true` |
+| без `win-arm64` | при сборке через решение Visual Studio папка называется просто `net10.0`; `win-arm64` появляется только при `dotnet publish -r win-arm64` из командной строки |
 | `chcp 65001` | если кириллица в выводе — кракозябры, эта команда переключает кодировку терминала на UTF-8 |
 
 **Ожидаем:** `Сложение = 15`, `Вычитание = 5`, `Умножение = 50`, `Деление = 2`
@@ -388,7 +388,7 @@ Build → Build Solution
 ```
 
 ```cmd
-cs\SP_06\bin\Release\net10.0\win-arm64\SP_06.exe
+cs\SP_06\bin\Release\net10.0\SP_06.exe
 ```
 
 **Ожидаем:** `Сложение = 15`, `Вычитание = 5`, `Умножение = 50`, `Деление = 2`

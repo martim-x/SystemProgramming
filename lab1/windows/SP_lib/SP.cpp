@@ -22,4 +22,4 @@ BOOL APIENTRY DllMain( HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReser
 EXPORT int sum(int x, int y) { return x + y; }
 EXPORT int sub(int x, int y) { return x - y; }
 EXPORT int mul(int x, int y) { return x * y; }
-EXPORT int div(int x, int y) { return y != 0 ? x / y : 0; }
+EXPORT int div_int(int x, int y) { return y != 0 ? x / y : 0; }

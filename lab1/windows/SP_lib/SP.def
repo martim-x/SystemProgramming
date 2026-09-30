@@ -3,4 +3,4 @@ EXPORTS
     sum
     sub
     mul
-    div
+    div = div_int

@@ -1,37 +1,28 @@
-# Лаба 1 — демонстрация Windows (задания 01, 02, 05, 06)
+# Лаба 1 — Windows (задания 01, 02, 05, 06)
 
-Работаем в **Visual Studio 2022**. Сначала один раз сделай подготовку — дальше
-в каждом задании только свои шаги.
+В Visual Studio часть работы — мышью, но весь код и все команды — чистыми блоками, копируются целиком.
+
+Сначала подготовка (один раз), потом каждое задание.
 
 ---
 
-## Подготовка (один раз)
+## Подготовка — создать библиотеку
 
-### 1. Создать библиотеку
-
-```
-File → New → Project → C++ → Dynamic-Link Library (DLL) → имя SP
-```
-
-Visual Studio сама создаст `SP/pch.h`, `SP/framework.h`, `SP/SP.cpp` и `SP.def`.
-
-### 2. Вписать функции
+### Шаг 1. Создать проект
 
 ```
-мы в: SP → Source Files → pch.h
+File → New → Project → C++ → Dynamic-Link Library (DLL) → имя SP → Create
 ```
 
-Дописать в конец:
+Visual Studio создаст четыре файла: `pch.h`, `framework.h`, `SP.cpp`, `SP.def`.
+
+### Шаг 2. Открыть `SP → Source Files → pch.h`, дописать в конец
 
 ```cpp
 #include <windows.h>
 ```
 
-```
-мы в: SP → Source Files → SP.cpp
-```
-
-Заменить содержимое:
+### Шаг 3. Открыть `SP → Source Files → SP.cpp`, заменить содержимое целиком
 
 ```cpp
 #include "pch.h"
@@ -42,11 +33,7 @@ EXPORT int mul(int x, int y) { return x * y; }
 EXPORT int div(int x, int y) { return y != 0 ? x / y : 0; }
 ```
 
-```
-мы в: SP → Source Files → SP.def
-```
-
-Заменить содержимое:
+### Шаг 4. Открыть `SP → Source Files → SP.def`, заменить содержимое целиком
 
 ```
 EXPORTS
@@ -56,42 +43,53 @@ EXPORTS
     div
 ```
 
-> Зачем `.def`: он же указывает компоновщику, какие функции наружу.
-> Без него будет ошибка `LNK2001: unresolved external symbol sum`.
+### Шаг 5. Собрать
 
 ```
 Build → Build Solution
 ```
 
-В папке `x64/Debug` появятся `SP.dll` и `SP.lib`. Оба нужны:
-`SP.dll` — сам код, `SP.lib` — имена функций для компоновщика.
+### Пояснения к шагам
 
-**Ошибка про `pch.h`:** `SP.cpp` начинается с `#include "pch.h"`. Если VS ругается —
-`Properties → C/C++ → Precompiled Headers → Precompiled Header = Use`,
-`Precompiled File = pch.h`.
+| Что | Расшифровка |
+|---|---|
+| `#include <windows.h>` в `pch.h` | подключаем Windows API. Он объявляет макрос `EXPORT` (`__declspec(dllexport)`), а также типы `BOOL`, `HMODULE`, `LPVOID`, `DWORD`, которые нужны для точки входа `DllMain` |
+| `#include "pch.h"` в `SP.cpp` | **обязательная первая строка.** Visual Studio включает режим Precompiled Headers: `SP.cpp` компилируется отдельно, и если он не подключит `pch.h` — ошибка `fatal error C1010: precompiled header file not found` |
+| `EXPORT` перед каждой функцией | макрос из `windows.h`, раскрывается в `__declspec(dllexport)` — «эту функцию видно снаружи». Без неё функция есть в DLL, но вызвать её из другого проекта нельзя |
+| `int div(int x, int y)` | функция называется `div`, а делить на ноль нельзя, поэтому `y != 0 ? x / y : 0` — защита, чтобы программа не упала на демонстрации |
+| `SP.def` | файл описания экспортов. Он говорит компоновщику: вот эти имена функций нужно отдать наружу. **Без него** при линковке будет `LNK2001: unresolved external symbol sum` |
+| `SP.dll` | получившийся файл библиотеки — сам машинный код |
+| `SP.lib` | таблица имён экспортов. Это не код, а «оглавление» для компоновщика. Прилинковывается к приложению, но в exe не попадает |
+
+### Если Visual Studio ругается на `pch.h`
+
+```
+Properties → C/C++ → Precompiled Headers → Precompiled Header: Use
+Properties → C/C++ → Precompiled Headers → Precompiled File: pch.h
+```
 
 ---
 
-## Задание 01 — статический вызов (LoadLibrary нет, линкер сам)
+## Задание 01 — статический вызов
+
+### Шаг 1. Создать приложение
 
 ```
-New → Project → C++ → Console App → имя SP_01
+File → New → Project → C++ → Console App → имя SP_01 → Create
 ```
 
-**Настройка линковки** (Properties проекта SP_01):
+### Шаг 2. Настроить линковку
 
-```
-Linker → Input → Additional Dependencies: SP.lib
-Linker → General → Additional Library Directories: путь к папке с SP.lib
-```
+Правый клик по проекту `SP_01` в Solution Explorer → `Properties`. Открыть `Linker → Input` и `Linker → General`.
 
-> `SP.lib` — файл, а не `SP.lib.lib`. Взять имя из сообщения компилятора.
-> Каталог указывать **не обязательно**, если положить `SP.lib` рядом с `.cpp` —
-> тогда `$(ProjectDir)` добавится сам.
+| Вкладка | Поле | Что вписать |
+|---|---|---|
+| `Linker → Input` | `Additional Dependencies` | `SP.lib` |
+| `Linker → General` | `Additional Library Directories` | полный путь к папке с `SP.lib` |
 
-```
-мы в: SP_01 → Source Files → main.cpp
-```
+> Каталог можно не указывать, если положить `SP.lib` рядом с `.cpp` — тогда Visual Studio подставит `$(ProjectDir)` сама.
+
+### Шаг 3. Открыть `SP_01 → Source Files → main.cpp`, заменить содержимое
 
 ```cpp
 #include <stdio.h>
@@ -112,47 +110,68 @@ int main()
 }
 ```
 
-> `extern "C"` — иначе имя станет `?sum@@YAHHH@Z` и линкер не найдёт функцию.
-> `__declspec(dllimport)` — говорит компилятору, что функция из чужой DLL.
+### Пояснения
+
+| Что | Расшифровка |
+|---|---|
+| `extern "C"` | объявление функции как C-совместимой. Без него компилятор C++ исказит имя в `?sum@@YAHHH@Z`, и линкер, ищущий `sum`, её не найдёт |
+| `__declspec(dllimport)` | «эта функция приходит извне, из другой DLL». Компилятор не будет искать её у себя, а линковщик возьмёт адрес из `SP.lib`. **Не путать** с `dllexport` — тем, что было в самой библиотеке |
+| `#include <stdio.h>` | нужен ради `printf`. В Windows это не `iostream` |
+| `%d` | формат для целого числа. `sum` возвращает `int` |
+
+### Шаг 4. Собрать, скопировать DLL, запустить
 
 ```
 Build → Build Solution
 ```
 
-**Перед запуском:** скопировать `SP.dll` из `SP/x64/Debug` в `SP_01/x64/Debug`.
-Без этого будет `0xc0000135: STATUS_DLL_NOT_FOUND`.
+Открыть `View → Terminal`, выбрать `Command Prompt`. Из корня решения `SP_01`:
 
-```
-Start → Start Without Debugging (Ctrl+F5)
-```
-
-**Ожидаем:** `sum = 15`, `sub = 5`, `mul = 50`, `div = 2`
-
-**Показать преподавателю разницу:**
-
-```
-мы в: окно терминала, папка x64\Debug SP_01
+```cmd
+xcopy ..\SP\x64\Debug\SP.dll x64\Debug\ /Y
 ```
 
 ```cmd
-dumpbin /dependents SP_01.exe
+x64\Debug\SP_01.exe
 ```
 
-> В списке будет `SP.dll` — значит загрузчик Windows сам подгрузит её при старте.
+| Ключ | Значение |
+|---|---|
+| `xcopy` | копирование файлов в Windows |
+| `..\SP\x64\Debug\SP.dll` | путь к библиотеке — на уровень выше, в папку проекта `SP`, конфигурация `x64`, режим `Debug` |
+| `x64\Debug\` | куда копируем — в папку вывода приложения |
+| `/Y` | не спрашивать «перезаписать файл», если он уже есть |
+
+**Ожидаем:** `sum = 15`, `sub = 5`, `mul = 50`, `div = 2`
+
+### Шаг 5. Доказательство для преподавателя
+
+```cmd
+dumpbin /dependents x64\Debug\SP_01.exe
+```
+
+| Ключ | Значение |
+|---|---|
+| `dumpbin` | утилита Visual Studio для разбора PE-файлов |
+| `/dependents` | показать список DLL, от которых зависит exe |
+
+В списке будет строка `SP.dll`. Это значит: библиотека прописана в бинарнике, и загрузчик Windows подгрузит её **сам** при старте приложения. Статическая линковка.
 
 ---
 
-## Задание 02 — динамический вызов (LoadLibrary + GetProcAddress)
+## Задание 02 — динамический вызов (LoadLibrary)
+
+### Шаг 1. Создать приложение
 
 ```
-New → Project → C++ → Console App → имя SP_02
+File → New → Project → C++ → Console App → имя SP_02 → Create
 ```
 
-**Настройку линковки НЕ меняем** — это и есть суть задания.
+### Шаг 2. Линковку НЕ настраиваем
 
-```
-мы в: SP_02 → Source Files → main.cpp
-```
+Это и есть суть задания — приложение не должно знать о библиотеке на этапе сборки.
+
+### Шаг 3. Открыть `SP_02 → Source Files → main.cpp`, заменить содержимое
 
 ```cpp
 #include <stdio.h>
@@ -192,41 +211,55 @@ int main(int argc, char* argv[])
 }
 ```
 
-> `BinFunc` — указатель на функцию. Присваиваем результат `GetProcAddress`.
-> `FreeLibrary` в конце — обязателен, освобождает библиотеку.
+### Пояснения
+
+| Что | Расшифровка |
+|---|---|
+| `LoadLibraryA("SP.dll")` | **аналог `dlopen` в Linux.** Загружает библиотеку в память прямо сейчас, во время работы программы. Возвращает `HMODULE` — дескриптор загруженной библиотеки |
+| буква `A` в `LoadLibraryA` | «ANSI» — строка в однобайтовой кодировке. Есть ещё `W`-версия для Unicode |
+| `GetProcAddress(hDll, "sum")` | **аналог `dlsym`.** Ищет функцию по имени в уже загруженной библиотеке и возвращает её адрес |
+| `typedef int (*BinFunc)(int, int);` | объявляем тип «указатель на функцию, которая берёт два `int` и возвращает `int`». Без такого типа нельзя корректно хранить результат `GetProcAddress` |
+| `(BinFunc)` | приведение типа: адрес функции → указатель на функцию. Явно, потому что `GetProcAddress` возвращает универсальный `FARPROC` |
+| `if (!hDll)` | проверка на NULL — библиотека не нашлась. `!hDll` истинно, когда указатель равен нулю |
+| `GetLastError()` | код последней ошибки Windows. Число `126` = файл не найден, `126`/`2` = DLL не найдена |
+| `FreeLibrary(hDll)` | **обязателен в конце.** Выгружает библиотеку и уменьшает счётчик. Забыть — утечка памяти, при повторных вызовах DLL не выгрузится никогда |
+| `%lu` | формат для `unsigned long`, каким возвращается `GetLastError` |
+
+### Шаг 4. Собрать, скопировать, запустить
 
 ```
 Build → Build Solution
 ```
 
-**Перед запуском:** скопировать `SP.dll` в `SP_02/x64/Debug`.
-
+```cmd
+xcopy ..\SP\x64\Debug\SP.dll x64\Debug\ /Y
 ```
-Ctrl+F5
+
+```cmd
+x64\Debug\SP_02.exe
 ```
 
 **Ожидаем:** `sum = 15`, `sub = 5`, `mul = 50`, `div = 2`
 
-**Показать преподавателю разницу:**
+### Шаг 5. Доказательство для преподавателя
 
 ```cmd
-dumpbin /dependents SP_02.exe
+dumpbin /dependents x64\Debug\SP_02.exe
 ```
 
-> `SP.dll` в списке **отсутствует** — в отличие от задания 01. Приложение грузит
-> библиотеку само в момент работы. Это и есть главное доказательство.
+`SP.dll` в списке **отсутствует**. В отличие от задания 01 — библиотеки в бинарнике нет, программа грузит её сама в момент работы. Это главное доказательство динамической линковки.
 
 ---
 
 ## Задание 05 — C#, статический вызов (DllImport)
 
-```
-New → Project → C# → Console App → имя SP_05 → Framework: .NET 8.0
-```
+### Шаг 1. Создать приложение
 
 ```
-мы в: SP_05 → Program.cs
+File → New → Project → C# → Console App → имя SP_05 → Framework: .NET 8.0 → Create
 ```
+
+### Шаг 2. Открыть `SP_05 → Program.cs`, заменить содержимое
 
 ```csharp
 using System;
@@ -256,25 +289,36 @@ internal class Program
 }
 ```
 
-> `CallingConvention.Cdecl` — обя��ательно, код написан на C.
-> На x64 разницы нет, на x86 без него будет `AccessViolationException`.
-> `@"SP"` — чтобы не пришлось удваивать обратный слэш.
+### Пояснения
+
+| Что | Расшифровка |
+|---|---|
+| `using System.Runtime.InteropServices;` | подключает пространство имён, где живут `DllImport` и `CallingConvention` |
+| `[DllImport(...)]` | атрибут «объявлено в DLL». Читается при вызове — .NET загружает библиотеку и подставляет реальный адрес функции. **Работает только со статически известным именем** |
+| `extern` | функция объявлена, но тела нет — она не в нашей программе, а в DLL |
+| `public static` | видно всем, можно звать без создания объекта |
+| `@"SP"` | префикс `@` перед строкой отключает обработку escape-последовательностей. Без него пришлось бы писать `@"SP"` вместо обычного `"SP"` с удвоенным слэшем |
+| имя `"SP"` **без `.dll`** | .NET сам дописывает расширение и ищет `SP.dll`. Это не ошибка, так и задумано для переносимости |
+| `CallingConvention.Cdecl` | соглашение о вызове — как передавать аргументы и кто чистит стек. **Обязательно**, потому что наша DLL собрана как C-код. На x64 разницы нет, на x86 без этого будет `AccessViolationException` при первом же вызове |
+| `$"..."` | интерполированная строка — вместо конкатенации. Проще читается |
+
+### Шаг 3. Собрать, скопировать DLL, запустить
 
 ```
 Build → Build Solution
 ```
 
-**Перед запуском:** скопировать `SP.dll` в папку вывода `SP_05`:
+```cmd
+xcopy ..\SP\x64\Debug\SP.dll bin\Debug\net8.0\ /Y
+```
 
 ```cmd
-xcopy ..\SP\x64\Debug\SP.dll bin\Debug\net8.0\ 
+bin\Debug\net8.0\SP_05.exe
 ```
 
-> Без этого `DllNotFoundException: не удалось загрузить «SP.dll»».
-
-```
-Ctrl+F5
-```
+| Ключ | Значение |
+|---|---|
+| `bin\Debug\net8.0\` | папка вывода .NET-приложения. Имя зависит от версии фреймворка — для `.NET 8.0` это именно `net8.0` |
 
 **Ожидаем:** `Сложение = 15`, `Вычитание = 5`, `Умножение = 50`, `Деление = 2`
 
@@ -282,13 +326,13 @@ Ctrl+F5
 
 ## Задание 06 — C#, динамический вызов (NativeLibrary.Load)
 
-```
-New → Project → C# → Console App → имя SP_06 → Framework: .NET 8.0
-```
+### Шаг 1. Создать приложение
 
 ```
-мы в: SP_06 → Program.cs
+File → New → Project → C# → Console App → имя SP_06 → Framework: .NET 8.0 → Create
 ```
+
+### Шаг 2. Открыть `SP_06 → Program.cs`, заменить содержимое
 
 ```csharp
 using System;
@@ -323,52 +367,68 @@ internal class Program
 }
 ```
 
-> `NativeLibrary.Load` — аналог `dlopen` в C#.
-> `NativeLibrary.GetExport` — аналог `dlsym`.
-> `GetDelegateForFunctionPointer` превращает адрес в вызываемый делегат.
-> `BinFunc` помечен `UnmanagedFunctionPointer` — чтобы .NET знал про C-соглашение.
+### Пояснения
+
+| Что | Расшифровка |
+|---|---|
+| `NativeLibrary.Load("SP.dll")` | **аналог `dlopen` в C#.** Загружает библиотеку в момент работы. Возвращает `IntPtr` — необрабатываемый указатель на модуль |
+| `hDll == IntPtr.Zero` | проверка «не загрузилась ли библиотека». `IntPtr.Zero` — это ноль |
+| `NativeLibrary.GetExport(hDll, "sum")` | **аналог `dlsym`.** Возвращает `IntPtr` — адрес функции |
+| `Marshal.GetDelegateForFunctionPointer` | превращает голый адрес в вызываемый делегат. Без этого шага `IntPtr` нельзя вызвать как функцию |
+| `[UnmanagedFunctionPointer]` | помечает делегат как «указатель на нативную функцию». Атрибут на самом деле не нужен, но без него код читается как «указатель на C#-метод», а это разные вещи |
+| `delegate int BinFunc(int x, int y);` | объявление типа делегата: сигнатура функции `int(int, int)`. Должна **точно** совпадать с реальной сигнатурой из DLL, иначе упадёт |
+| `NativeLibrary.Free(hDll)` | выгружает библиотеку. Обязателен, как и `FreeLibrary` в задании 02 |
+
+### Шаг 3. Собрать, скопировать, запустить
 
 ```
 Build → Build Solution
 ```
 
 ```cmd
-xcopy ..\SP\x64\Debug\SP.dll bin\Debug\net8.0\ 
+xcopy ..\SP\x64\Debug\SP.dll bin\Debug\net8.0\ /Y
 ```
 
-```
-Ctrl+F5
+```cmd
+bin\Debug\net8.0\SP_06.exe
 ```
 
 **Ожидаем:** `Сложение = 15`, `Вычитание = 5`, `Умножение = 50`, `Деление = 2`
 
-**Показать преподавателю разницу:**
+### Шаг 4. Доказательство для преподавателя
 
-> Открой `Program.cs` заданий 05 и 06 и сравни. В 05 имя `"SP"` — это **шаблон**,
-> .NET сам найдёт `SP.dll` при старте. В 06 строка `"SP.dll"` — **явный вызов**
-> загрузки в момент работы. Разница в одну строку, но по сути это статика против
-> динамики, как в заданиях 01 и 02.
+Открыть `Program.cs` заданий 05 и 06 и сравнить одну строку:
+
+| Задание 05 | Задание 06 |
+|---|---|
+| `[DllImport(@"SP", CallingConvention = ...)]` | `NativeLibrary.Load("SP.dll")` |
+| имя-шаблон, .NET ищет библиотеку **сам при старте** | **явная** загрузка в момент работы |
+| статическая линковка | динамическая линковка |
+
+Разница в одной строке, по сути это тот же контраст, что в заданиях 01 и 02.
 
 ---
 
 ## Если скомпилировалось, но не запускается
 
-| Симптом | Что делать |
-|---|---|
-| `0xc0000135 STATUS_DLL_NOT_FOUND` | скопировать `SP.dll` рядом с `.exe` / в папку вывода |
-| `LNK2001: unresolved external symbol sum` | не прописана линковка (задание 01) или не заполнен `SP.def` |
-| `LNK1112: library not found` | путь в `Additional Library Directories` указывает не туда |
-| `DllNotFoundException` в C# | DLL не скопирована в `bin\Debug\net8.0\` |
-| `AccessViolationException` | убрать `CallingConvention.Cdecl` нельзя, наоборот — добавить |
-| ошибка про `pch.h` | `Properties → C/C++ → Precompiled Headers → Use` |
+| Симптом | Причина | Что делать |
+|---|---|---|
+| `0xc0000135 STATUS_DLL_NOT_FOUND` | DLL не рядом с `.exe` | `xcopy ..\SP\x64\Debug\SP.dll x64\Debug\ /Y` |
+| `LNK2001: unresolved external symbol sum` | нет линковки или пуст `SP.def` | задание 01: проверить `Additional Dependencies`; библиотека: заполнить `SP.def` |
+| `LNK1112: library not found` | неверный путь | проверить `Additional Library Directories` |
+| `LoadLibrary FAILED, error = 126` | DLL нет в папке программы | та же команда `xcopy` |
+| `GetProcAddress FAILED` | функция не экспортирована | проверь `EXPORT` в `SP.cpp` и `SP.def` |
+| `DllNotFoundException` в C# | DLL не скопирована в папку вывода | `xcopy ..\SP\x64\Debug\SP.dll bin\Debug\net8.0\ /Y` |
+| `AccessViolationException` | не указано соглашение о вызовах | добавить `CallingConvention.Cdecl` |
+| `fatal error C1010: precompiled header not found` | в `SP.cpp` нет `#include "pch.h"` | вернуть первую строку или отключить PCH в свойствах проекта |
 
 ---
 
-## Порядок выступления (Windows)
+## Порядок выступления
 
 1. Показать структуру: одна библиотека `SP`, четыре приложения `01/02/05/06`.
-2. Задание 01 → `Ctrl+F5` → результат.
+2. Задание 01 → запуск → результат.
 3. `dumpbin /dependents SP_01.exe` → `SP.dll` **есть**.
-4. Задание 02 → `Ctrl+F5` → результат.
-5. `dumpbin /dependents SP_02.exe` → `SP.dll` **нет**. ← контраст
+4. Задание 02 → запуск → результат.
+5. `dumpbin /dependents SP_02.exe` → `SP.dll` **нет**. ← главный контраст
 6. Задания 05 и 06 → сравнить `DllImport("SP")` и `NativeLibrary.Load("SP.dll")`.

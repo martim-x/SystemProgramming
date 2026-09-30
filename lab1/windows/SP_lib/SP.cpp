@@ -3,8 +3,6 @@
 #ifdef _WIN32
 #define EXPORT extern "C" __declspec(dllexport)
 
-#pragma function(div)
-
 BOOL APIENTRY DllMain( HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved )
 {
 	switch (ul_reason_for_call)

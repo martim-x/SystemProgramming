@@ -418,6 +418,7 @@ cs\SP_06\bin\Release\net10.0\SP_06.exe
 | `GetProcAddress FAILED` | функция не экспортирована | проверь `EXPORT` в `SP.cpp` и `SP.def` |
 | `DllNotFoundException` в C# | DLL не скопирована в папку вывода | пересобери проект — таргет `CopySPLib` копирует DLL сам |
 | `AccessViolationException` | не указано соглашение о вызовах | добавить `CallingConvention.Cdecl` |
+| `error NETSDK1004: project.assets.json не найден` | нет папки `obj\` после `git clean` или свежего клона | собери через Visual Studio, либо добавь ключ `-restore` к `msbuild` |
 | `error MSB8020: средств сборки не найдено` | в проекте указан чужой тулсет | в `.vcxproj` должно быть `<PlatformToolset>v145</PlatformToolset>` |
 | `error C2169: div — подставляемая функция` | имя `div` занято в CRT | функция в `SP.cpp` называется `div_int`, экспорт `div` идёт через алиас в `SP.def` |
 | `fatal error C1010: precompiled header not found` | в `SP.cpp` нет `#include "pch.h"` | вернуть первую строку или отключить PCH в свойствах |

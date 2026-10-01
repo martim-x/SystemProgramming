@@ -99,18 +99,29 @@ system("pause");
 File → New → Project → C++ → Dynamic-Link Library (DLL) → имя SP → Create
 ```
 
-Visual Studio создаст четыре файла: `pch.h`, `framework.h`, `SP.cpp`, `SP.def`.
+Visual Studio создаст файлы `pch.h`, `framework.h`, `SP.cpp`, `pch.cpp`, `SP.def`.
 
-### Шаг 2. Открыть `SP → Source Files → pch.h`, дописать в конец
+### Шаг 2. Открыть `SP → Source Files → pch.h`, заменить содержимое целиком
 
 ```cpp
-#include <windows.h>
+#if !defined(PCH_H) && defined( _WIN32)
+#define PCH_H
+
+#include <stdio.h>
+
+#endif
 ```
+
+**Здесь не должно быть `<windows.h>`.** Он тянет `stdlib.h`, а тот объявляет
+встроенную функцию `div_t div(int,int)` — после неё невозможно определить свою
+`int div(int,int)`. Точка входа DLL будет в отдельном файле (шаг 4).
 
 ### Шаг 3. Открыть `SP → Source Files → SP.cpp`, заменить содержимое целиком
 
 ```cpp
 #include "pch.h"
+
+#define EXPORT extern "C" __declspec(dllexport)
 
 EXPORT int sum(int x, int y) { return x + y; }
 EXPORT int sub(int x, int y) { return x - y; }
@@ -118,17 +129,57 @@ EXPORT int mul(int x, int y) { return x * y; }
 EXPORT int div(int x, int y) { return y != 0 ? x / y : 0; }
 ```
 
-### Шаг 4. Открыть `SP → Source Files → SP.def`, заменить содержимое целиком
+### Шаг 4. Создать `SP → Source Files → dllmain.cpp`
+
+Правый клик по проекту `SP` → **Add → New File** → имя `dllmain.cpp`:
+
+```cpp
+#include <windows.h>
+
+BOOL APIENTRY DllMain( HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved )
+{
+	switch (ul_reason_for_call)
+	{
+		case DLL_PROCESS_ATTACH:
+		case DLL_THREAD_ATTACH:
+		case DLL_THREAD_DETACH:
+		case DLL_PROCESS_DETACH: break;
+	}
+	return TRUE;
+}
+```
+
+`windows.h` подключается здесь, а не в общей `pch.h` — иначе конфликт имени `div`
+вернётся.
+
+### Шаг 5. Отключить встроенные функции компилятора
+
+Правый клик по проекту `SP` → **Properties**:
 
 ```
-EXPORTS
-    sum
-    sub
-    mul
-    div
+C/C++ → Language → Optimization → Enable Intrinsic Functions → No (/Oi-)
 ```
 
-### Шаг 5. Собрать
+Если такой галочки в списке нет — добавь в `SP.vcxproj` внутрь `<ClCompile>`
+строку:
+
+```xml
+<AdditionalOptions>/Oi- %(AdditionalOptions)</AdditionalOptions>
+```
+
+**Это обязательный шаг.** При `/O2` компилятор узнаёт в `div` свою встроенную
+функцию и даёт `error C2169: div: подставляемая функция, определение невозможно`.
+
+### Шаг 6. Удалить SP.def
+
+Файл `SP.def` **не нужен** и должен быть удалён из проекта
+(правый клик → **Remove**). Экспорты задаются макросом `EXPORT` в `SP.cpp`.
+
+Если оставить его в свойствах линковщика
+(**Linker → Input → Module Definition File**), сборка будет идти старым
+путём. Проверить, что поле пустое.
+
+### Шаг 7. Собрать
 
 ```
 Build → Build Solution
@@ -138,11 +189,14 @@ Build → Build Solution
 
 | Что | Расшифровка |
 |---|---|
-| `#include <windows.h>` в `pch.h` | подключаем Windows API. Он объявляет макрос `EXPORT` (`__declspec(dllexport)`), а также типы `BOOL`, `HMODULE`, `LPVOID`, `DWORD`, которые нужны для точки входа `DllMain` |
+| `#include <stdio.h>` в `pch.h` | подключаем только ввод-вывод. **`windows.h` здесь не подключается намеренно** — он приносит `stdlib.h`, где объявлена встроенная `div_t div(int,int)`, и имя `div` становится недоступным для нашей функции |
+| `#define EXPORT extern "C" __declspec(dllexport)` | `__declspec(dllexport)` — «эта функция видна снаружи». `extern "C"` — запрет искажения имени компилятором C++, иначе вместо `sum` экспортировалось бы `?sum@@YAHHH@Z` |
 | `#include "pch.h"` в `SP.cpp` | **обязательная первая строка.** Visual Studio включает режим Precompiled Headers: `SP.cpp` компилируется отдельно, и если он не подключит `pch.h` — ошибка `fatal error C1010: precompiled header file not found` |
 | `EXPORT` перед каждой функцией | макрос из `windows.h`, раскрывается в `__declspec(dllexport)` — «эту функцию видно снаружи». Без неё функция есть в DLL, но вызвать её из другого проекта нельзя |
 | `int div(int x, int y)` | функция называется `div`, а делить на ноль нельзя, поэтому `y != 0 ? x / y : 0` — защита, чтобы программа не упала на демонстрации |
-| `SP.def` | файл описания экспортов. Он говорит компоновщику: вот эти имена функций нужно отдать наружу. **Без него** при линковке будет `LNK2001: unresolved external symbol sum` |
+| `dllmain.cpp` | отдельный файл ради `DllMain`. Точка входа DLL требует типы `BOOL`, `HMODULE`, `DWORD` из `windows.h`, но подключать его в общем заголовке нельзя — конфликт с `div` |
+| `/Oi-` | отключает встроенные функции компилятора. Без него `/O2` включает распознавание `div` как встроенной функции и сборка падает с `C2169`. Это второй обязательный шаг, первый — убрать `windows.h` из `pch.h` |
+| удаление `SP.def` | файл не используется. Экспорты задаются макросом `EXPORT`. Проверяется `dumpbin /exports SP.dll` — должны быть ровно `div`, `mul`, `sub`, `sum` |
 | `SP.dll` | получившийся файл библиотеки — сам машинный код |
 | `SP.lib` | таблица имён экспортов. Это не код, а «оглавление» для компоновщика. Прилинковывается к приложению, но в exe не попадает |
 
@@ -490,15 +544,18 @@ cs\SP_06\bin\Release\net10.0\SP_06.exe
 | Симптом | Причина | Что делать |
 |---|---|---|
 | `0xc0000135 STATUS_DLL_NOT_FOUND` | DLL не рядом с `.exe` | пересобери — `SP.dll` копируется автоматически |
-| `LNK2001: unresolved external symbol sum` | нет линковки или пуст `SP.def` | задание 01: проверь `ProjectReference` на `SP.vcxproj`; библиотека: заполни `SP.def` |
+| `LNK2001: unresolved external symbol sum` | нет линковки с библиотекой | задание 01: проверь `ProjectReference` на `SP.vcxproj` |
+| `LNK1120: 4 неразрешённых внешних символа` | то же, плюс не найдена сама `SP.dll` | проверь, что `SP_lib` собрался раньше `SP_01` — `Build → Build Solution` |
 | `LNK1112: library not found` | неверный путь к `.lib` | проверь `Additional Library Directories` |
 | `LoadLibrary FAILED, error = 126` | DLL нет в папке программы | та же сборка, что и выше |
-| `GetProcAddress FAILED` | функция не экспортирована | проверь `EXPORT` в `SP.cpp` и `SP.def` |
+| `GetProcAddress FAILED` | функция не экспортирована | проверь `EXPORT` в `SP.cpp`; посмотри `dumpbin /exports SP.dll` |
 | `DllNotFoundException` в C# | DLL не скопирована в папку вывода | пересобери проект — таргет `CopySPLib` копирует DLL сам |
 | `AccessViolationException` | не указано соглашение о вызовах | добавить `CallingConvention.Cdecl` |
 | `error NETSDK1004: project.assets.json не найден` | нет папки `obj\` после `git clean` или свежего клона | собери через Visual Studio, либо добавь ключ `-restore` к `msbuild` |
 | `error MSB8020: средств сборки не найдено` | в проекте указан чужой тулсет | в `.vcxproj` должно быть `<PlatformToolset>v145</PlatformToolset>` |
-| `error C2169: div — подставляемая функция` | имя `div` занято в CRT | функция в `SP.cpp` называется `div_int`, экспорт `div` идёт через алиас в `SP.def` |
+| `error C2169: div — подставляемая функция, определение невозможно` | `/O2` включил встроенные функции, компилятор узнал в `div` свою | **C/C++ → Language → Optimization → Enable Intrinsic Functions → No** |
+| `warning C4391: неправильный возвращаемый тип для подставляемой функции` | предшествует `C2169`, тот же корень | лечится тем же флагом `/Oi-` |
+| та же ошибка после включения `/Oi-` | в `pch.h` остался `<windows.h>` | убери `windows.h` из `pch.h`, оставь только `<stdio.h>`; `DllMain` перенеси в `dllmain.cpp` |
 | `fatal error C1010: precompiled header not found` | в `SP.cpp` нет `#include "pch.h"` | вернуть первую строку или отключить PCH в свойствах |
 
 ---

@@ -36,8 +36,17 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <!-- /Oi- : "div" is an MSVC intrinsic returning div_t; our extern "C" int div(int,int)
-           from SP.dll must be treated as a plain external function. -->
+      <!-- /Oi- отключает встраивание функций.
+
+           Имя экспортируемой функции на Windows буквально «div»: в SP.def стоит
+           алиас div = div_int, потому что MSVC объявляет div() как встроенную
+           функцию в <intrinst.h>.
+
+           Наша extern "C" int div(int, int) из SP.dll должна обрабатываться как
+           обычная внешняя функция. Возвращаемый тип встроенной функции (div_t)
+           имел бы значение только при встраивании, которое /Oi- выключает.
+           Без этого компилятор даёт жёсткую ошибку C2169: «div»: подставляемая
+           функция, определение невозможно. -->
       <IntrinsicFunctions>false</IntrinsicFunctions>
     </ClCompile>
     <Link>
@@ -47,9 +56,25 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
   </ItemGroup>
-  <!-- Static linking: the ProjectReference supplies the SP.lib import-library search path,
-       the build order, and links SP.lib into SP_01.exe (so SP.dll shows up in the
-       import table - that is the whole point of this lab variant). -->
+  <!-- Статическая линковка — в этом весь смысл задания 01.
+
+       ProjectReference здесь работает в полную силу, в отличие от задания 02:
+       даёт путь к SP.lib, задаёт порядок сборки и ЛИНКУЕТ библиотеку в exe.
+       Из-за этого SP.dll попадает в таблицу импортов SP_01.exe — загрузчик
+       Windows обязан найти её при старте, иначе 0xc0000135.
+
+       Проверка: dumpbin /dependents SP_01.exe показывает SP.dll в списке. -->
+
+  <!-- Копирование SP.dll рядом с exe.
+       Без этого запуск падает с 0xc0000135 STATUS_DLL_NOT_FOUND: загрузчик
+       Windows ищет DLL только в папке самого exe.
+
+       $(MSBuildThisFileDirectory) — папка текущего .vcxproj с завершающим
+       слэшем. Нужен вместо $(SolutionDir), потому что этот файл может быть
+       собран и напрямую, без открытого решения.
+
+       Condition на Exists означает: если DLL ещё нет, сборка не падает,
+       а просто пропускает копирование. Ошибка всплывёт позже, при запуске. -->
   <ItemGroup>
     <ProjectReference Include="..\SP_lib\SP.vcxproj">
       <Project>{1A7C4E20-0B31-4C7D-9E11-000000000000}</Project>

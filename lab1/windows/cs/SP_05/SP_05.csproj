@@ -6,17 +6,26 @@
     <Nullable>disable</Nullable>
   </PropertyGroup>
 
-  <!--
-    Copy the native SP.dll next to the built exe so P/Invoke can find it.
-    $(Platform) is AnyCPU for C# projects, so the native output dir is
-    searched explicitly. First existing candidate wins.
-  -->
+  <!-- Копирование нативной SP.dll рядом со собранным exe.
+
+       Зачем: DllImport в C# ищет библиотеку по правилам загрузчика Windows,
+       то есть в папке самого exe. Без копирования запуск падает с
+       DllNotFoundException.
+
+       Почему не через $(Platform): у C#-проектов $(Platform) равен AnyCPU,
+       а не ARM64. Подставить ARM64 в путь можно только вручную, как здесь.
+
+       Три кандидата проверяются по порядку, побеждает первый существующий.
+       Условие '$(SPLibPath)' == '' в каждом следующем не даёт переписать уже
+       найденный путь. Первый кандидат — фактический путь на этой машине. -->
   <PropertyGroup>
     <SPLibRelDir1>..\..\SP_lib\SP\ARM64\Release\SP.dll</SPLibRelDir1>
     <SPLibRelDir2>..\..\SP_lib\bin\ARM64\Release\SP.dll</SPLibRelDir2>
     <SPLibRelDir3>..\..\SP_lib\bin\Release\SP.dll</SPLibRelDir3>
   </PropertyGroup>
 
+  <!-- AfterTargets="Build" — копирование произойдёт после сборки проекта,
+       но до того, как Visual Studio его запустит. -->
   <Target Name="CopySPLib" AfterTargets="Build">
     <PropertyGroup>
       <SPLibPath Condition="'$(SPLibPath)' == '' And Exists('$(SPLibRelDir1)')">$(SPLibRelDir1)</SPLibPath>

@@ -44,9 +44,16 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
   </ItemGroup>
-  <!-- Dynamic linking: SP.lib must NOT be linked here (LoadLibrary/GetProcAddress
-       only). The reference is build-order + DLL-copy only, so SP.dll lands next
-       to SP_02.exe without creating a static import of SP.dll in the import table. -->
+  <!-- Ссылка на проект библиотеки существует ТОЛЬКО ради порядка сборки.
+
+       LinkLibraryDependencies=false — ключевой момент всего задания 02.
+       Если его поставить в true, линкер добавит SP.lib в строку команды,
+       SP.dll попадёт в таблицу импортов SP_02.exe, и задание из «динамической
+       линковки» превратится в статическую. Проверяется через
+       dumpbin /dependents SP_02.exe — там не должно быть SP.dll.
+
+       ReferenceOutputAssembly=false и Private=false запрещают копировать
+       результат сборки зависимости в выходную папку этого проекта. -->
   <ItemGroup>
     <ProjectReference Include="..\SP_lib\SP.vcxproj">
       <Project>{1A7C4E20-0B31-4C7D-9E11-000000000000}</Project>
@@ -55,6 +62,17 @@
       <Private>false</Private>
     </ProjectReference>
   </ItemGroup>
+
+  <!-- Копирование SP.dll рядом с exe.
+       Без этого запуск падает с 0xc0000135 STATUS_DLL_NOT_FOUND: загрузчик
+       Windows ищет DLL только в папке самого exe.
+
+       $(MSBuildThisFileDirectory) — папка текущего .vcxproj с завершающим
+       слэшем. Нужен вместо $(SolutionDir), потому что этот файл может быть
+       собран и напрямую, без открытого решения.
+
+       Condition на Exists означает: если DLL ещё нет, сборка не падает,
+       а просто пропускает копирование. Ошибка всплывёт позже, при запуске. -->
   <Target Name="CopySPDllToOutDir" AfterTargets="Build">
     <ItemGroup>
       <SPDllSource Include="$(MSBuildThisFileDirectory)..\SP_lib\SP\$(Platform)\$(Configuration)\SP.dll" />

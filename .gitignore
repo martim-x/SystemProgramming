@@ -20,3 +20,10 @@ lab1/windows/SP_lib/SP/
 lab1/windows/SP_01/SP_01/
 lab1/windows/SP_02/SP_02/
 lab1/windows/*/obj/
+
+# Служебные файлы Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates

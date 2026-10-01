@@ -1,6 +1,0 @@
-LIBRARY SP
-EXPORTS
-    sum
-    sub
-    mul
-    div = div_int

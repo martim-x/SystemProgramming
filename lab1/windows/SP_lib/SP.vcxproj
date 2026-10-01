@@ -48,6 +48,16 @@
            С этим флагом наша функция считается обычной внешней и экспортируется
            под именем div. Проверено: dumpbin /exports показывает "div". -->
       <IntrinsicFunctions>false</IntrinsicFunctions>
+      <!-- /Oi- обязателен именно как флаг командной строки.
+
+           Параметр IntrinsicFunctions выше MSBuild в этой версии не отображает
+           в cl (проверено: в команде компиляции флага /Oi- нет, хотя /O2 стоит,
+           а /O2 сам по себе включает встроенные функции).
+
+           Без /Oi- компилятор узнаёт в div() свою встроенную функцию
+           (возвращает div_t) и даёт C2169. С флагом наша int div(int,int)
+           считается обычной внешней и экспортируется под именем div. -->
+      <AdditionalOptions>/Oi- %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>

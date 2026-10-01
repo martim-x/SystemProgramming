@@ -37,6 +37,17 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <!-- /Oi- отключает встроенные функции компилятора.
+
+           Без него при /O2 компилятор узнаёт в div() свою встроенную функцию
+           (она возвращает div_t — частное и остаток от деления) и отказывается
+           определять нашу int div(int,int):
+
+               error C2169: div: подставляемая функция, определение невозможно
+
+           С этим флагом наша функция считается обычной внешней и экспортируется
+           под именем div. Проверено: dumpbin /exports показывает "div". -->
+      <IntrinsicFunctions>false</IntrinsicFunctions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>

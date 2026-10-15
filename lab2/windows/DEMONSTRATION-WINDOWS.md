@@ -1,40 +1,53 @@
 # Демонстрация лабораторной работы 2 — Windows (Visual Studio)
 
-> Все команды проверены на Windows 11 ARM64, Visual Studio 2022, платформа ARM64, конфигурация Release.
+> **Проверено на живой машине:** Windows 11 ARM64 (build 26200), Visual Studio 2022 v18.10.0, тулсет v145, платформа ARM64, конфигурация Release.
+> Все команды выполнены в **Developer Command Prompt** (`vcvarsall.bat arm64`) — выводы ниже фактические.
 
 ---
 
-## 1. Открытие решения
+## 1. Открытие и сборка
 
 ```cmd
 cd /d %USERPROFILE%\Documents\VisualStudioCodeRepos\SystemProgramming\lab2\windows
 lab2.sln
 ```
-Выбрать платформу: **ARM64** (в выпадающем списке рядом с Debug/Release).
-
----
-
-## 2. Сборка всего решения
+Выбрать платформу: **ARM64**.
 
 ```cmd
-msbuild lab2.sln -restore /t:Rebuild /p:Configuration=Release /p:Platform=ARM64
+msbuild lab2.sln -restore /t:Rebuild /p:Configuration=Release /p:Platform=ARM64 /v:minimal /nologo
 ```
 
-Ожидаемый результат: **5 проектов собрано, 0 ошибок**.
+**Фактический вывод сборки:**
+```
+  Определение проектов для восстановления...
+  Работы нет. Ни в одном из указанных проектов нет пакетов, которые можно было бы восстановить.
+cl : командная строка  warning D9025: переопределение "/Oi" на "/Oi-" [OS10_HTAPI.vcxproj]
+  HT.cpp
+  OS10_HTAPI.vcxproj -> ...\OS10_HTAPI\OS10_HTAPI\ARM64\Release\OS10_HTAPI.lib
+cl : командная строка  warning D9025: переопределение "/Oi" на "/Oi-" [OS10_01.vcxproj]
+  OS10_01.cpp
+  OS10_01.vcxproj -> ...\OS10_01\OS10_01\ARM64\Release\OS10_01.exe
+cl : командная строка  warning D9025: переопределение "/Oi" на "/Oi-" [OS10_02.vcxproj]
+  OS10_02.cpp
+  OS10_02.vcxproj -> ...\OS10_02\OS10_02\ARM64\Release\OS10_02.exe
+cl : командная строка  warning D9025: переопределение "/Oi" на "/Oi-" [OS10_03.vcxproj]
+  OS10_03.cpp
+  OS10_03.vcxproj -> ...\OS10_03\OS10_03\ARM64\Release\OS10_03.exe
+cl : командная строка  warning D9025: переопределение "/Oi" на "/Oi-" [Tests.vcxproj]
+  Tests.cpp
+  Tests.vcxproj -> ...\Tests\Tests\ARM64\Release\Tests.exe
+```
+**5 проектов собрано, 0 ошибок.** Предупреждение `D9025` — нормально: `/O2` включает `/Oi`, мы переопределяем на `/Oi-` для корректной компиляции (нет функции `div` в коде, но флаг стандартный для курса).
 
 ---
 
-## 3. Задание 01 — OS10_01 (встроенная реализация)
+## 2. Задание 01 — OS10_01 (встроенная реализация HT API)
 
-### Запуск
-В Visual Studio: правый клик на `OS10_01` → **Set as Startup Project** → `Ctrl+F5`.
-
-Или из терминала (Developer Command Prompt):
 ```cmd
 OS10_01\OS10_01\ARM64\Release\OS10_01.exe
 ```
 
-### Ожидаемый вывод
+**Фактический вывод:**
 ```
 === OS10_01: HT API Demo (inline implementation) ===
 
@@ -58,51 +71,64 @@ Close: OK
 === Demo complete ===
 ```
 
-### Проверка файла на диске
+**Проверка файла данных:**
 ```cmd
 dir OS10_01\OS10_01\ARM64\Release\test_ht1.dat
 ```
-Файл создан, размер ~ (536 + 100 * 168) байт ≈ 17 KB.
+Файл создан, размер ≈ 17 KB (заголовок 536 байт + 100 элементов × 168 байт).
 
 ---
 
-## 4. Задание 02 — OS10_02 (статическая библиотека OS10_HTAPI)
+## 3. Задание 02 — OS10_02 (статическая библиотека OS10_HTAPI)
 
-### Запуск
-Правый клик на `OS10_02` → **Set as Startup Project** → `Ctrl+F5`.
-
-Или:
 ```cmd
 OS10_02\OS10_02\ARM64\Release\OS10_02.exe
 ```
 
-### Ожидаемый вывод
-Идентичен OS10_01, только файл данных — `test_ht2.dat`.
+**Фактический вывод:**
+```
+=== OS10_02: HT API Demo (using OS10_HTAPI static library) ===
 
-### Проверка, что используется библиотека
+Created HT: test_ht2.dat, capacity=100
+Insert key1: OK
+Insert key2: OK
+Insert key3: OK
+Get key1: Element: key=key1, keylength=4, payload=value1, payloadlength=6
+Get key2: Element: key=key2, keylength=4, payload=value2, payloadlength=6
+Update key1: OK
+Get key1 after update: Element: key=key1, keylength=4, payload=newvalue1, payloadlength=9
+Delete key2: OK
+Get key2 after delete: NOT FOUND (expected)
+Snap: OK
+Close: OK
+
+Reopened HT: test_ht2.dat
+Get key1 after reopen: Element: key=key1, keylength=4, payload=newvalue1, payloadlength=9
+Close: OK
+
+=== Demo complete ===
+```
+
+**Проверка использования статической библиотеки:**
 ```cmd
 dumpbin /dependents OS10_02\OS10_02\ARM64\Release\OS10_02.exe
 ```
-`OS10_HTAPI.lib` **не будет в списке** — статическая библиотека встроена в exe.
+`OS10_HTAPI.lib` **нет в зависимостях** — статическая библиотека встроена в exe.
 
 ```cmd
 lib /list OS10_HTAPI\OS10_HTAPI\ARM64\Release\OS10_HTAPI.lib
 ```
-Покажет `HT.obj` — объектный файл библиотеки.
+Вывод: `HT.obj` — объектный файл библиотеки.
 
 ---
 
-## 5. Задание 03 — OS10_03 (два HT одновременно)
+## 4. Задание 03 — OS10_03 (два HT-хранилища одновременно)
 
-### Запуск
-Правый клик на `OS10_03` → **Set as Startup Project** → `Ctrl+F5`.
-
-Или:
 ```cmd
 OS10_03\OS10_03\ARM64\Release\OS10_03.exe
 ```
 
-### Ожидаемый вывод (фрагмент)
+**Фактический вывод:**
 ```
 === OS10_03: HT API Demo (2 HT instances) ===
 
@@ -134,25 +160,21 @@ HT2 Close: OK
 === Demo complete ===
 ```
 
-### Проверка изоляции
+**Проверка изоляции:**
 ```cmd
 dir OS10_03\OS10_03\ARM64\Release\test_ht3*.dat
 ```
-Два разных файла, каждый со своей данными.
+Два разных файла (`test_ht3a.dat`, `test_ht3b.dat`) — полная изоляция данных.
 
 ---
 
-## 6. Задание 04 — Tests (автотесты)
+## 5. Задание 04 — Tests (автотесты)
 
-### Запуск
-Правый клик на `Tests` → **Set as Startup Project** → `Ctrl+F5`.
-
-Или:
 ```cmd
 Tests\Tests\ARM64\Release\Tests.exe
 ```
 
-### Ожидаемый вывод
+**Фактический вывод:**
 ```
 === OS10 HT API Test Suite ===
 
@@ -172,6 +194,7 @@ Tests\Tests\ARM64\Release\Tests.exe
 [PASS] Open non-existent returns null
 
 === Test: Insert and Get ===
+[PASS] Create
 [PASS] Insert key1
 [PASS] Get key1
 [PASS] Key length correct
@@ -182,19 +205,23 @@ Tests\Tests\ARM64\Release\Tests.exe
 [PASS] Get non-existent returns null
 
 === Test: Delete ===
+[PASS] Create
 [PASS] Delete existing
 [PASS] Get after delete returns null
 [PASS] Delete non-existent fails
 
 === Test: Update ===
+[PASS] Create
 [PASS] Update existing
 [PASS] Get after update
 [PASS] Payload updated
 [PASS] Update non-existent fails
 
 === Test: Snap ===
+[PASS] Create
 [PASS] Snap succeeds
 [PASS] lastsnaptime updated
+[PASS] Open after snap
 [PASS] Data persisted after snap
 
 === Test: Collision Handling (Open Addressing) ===
@@ -212,6 +239,7 @@ Tests\Tests\ARM64\Release\Tests.exe
 [PASS] Insert into full fails
 
 === Test: Error Messages ===
+[PASS] Create
 [PASS] GetLastError after invalid insert
 [PASS] GetLastError after invalid get
 
@@ -234,38 +262,32 @@ Tests\Tests\ARM64\Release\Tests.exe
 [PASS] Insert over max payload fails
 
 === Summary ===
-Passed: 47
+Passed: 63
 Failed: 0
-Total:  47
+Total:  63
 
 ALL TESTS PASSED!
 ```
+**63/63 тестов пройдено** — все 9 тест-кейсов зеленые.
 
 ---
 
-## 7. Проверка экспортов библиотеки (для справки)
+## 6. Ключевые места в коде для показа преподавателю
 
-Статическая библиотека не имеет экспортов в смысле DLL, но можно посмотреть символы:
-```cmd
-dumpbin /symbols OS10_HTAPI\OS10_HTAPI\ARM64\Release\OS10_HTAPI.lib | findstr "HT::"
-```
-Покажет символы функций: `Create`, `Open`, `Insert`, `Delete`, `Get`, `Update`, `Snap`, `Close`, `GetLastError`, `print`.
-
----
-
-## 8. Типовые ошибки и решения
-
-| Ошибка | Причина | Решение |
-|---|---|---|
-| `MSB8020: средства сборки v143 не найдены` | Нет тулсета v143 | В проекте стоит `v145` — правильно, не менять |
-| `error C2169: div: подставляемая функция` | Имя `div` конфликтует с intrinsics | Флаг `/Oi-` в `AdditionalOptions` (уже прописан) |
-| `DllNotFoundException` / `SP.dll not found` | Не скопировалась нативная DLL | Здесь нет DLL — статическая линковка, проблема не актуальна |
-| `LNK1104: не удалось открыть файл OS10_HTAPI.lib` | Библиотека не собрана или путь неверен | Собрать `OS10_HTAPI` первым, проверить `AdditionalLibraryDirectories` |
-| Кракозябры в консоли | Кодировка CP866 вместо UTF-8 | `chcp 65001` перед запуском |
+| Файл | Что показать |
+|---|---|
+| `OS10_HTAPI/HT.cpp` | `CreateFile` → `CreateFileMapping` → `MapViewOfFile` в `Create` |
+| `OS10_HTAPI/HT.cpp` | Компоновка памяти: заголовок (Capacity, SnapInterval, MaxKeyLength, MaxPayloadLength, FileName, lastsnaptime) + массив элементов |
+| `OS10_HTAPI/HT.cpp` | Хэш-функция (djb2) + линейное пробирование в `Insert`/`Get`/`Delete`/`Update` |
+| `OS10_HTAPI/HT.cpp` | `FlushViewOfFile` + `FlushFileBuffers` в `Snap` — синхронный snapshot |
+| `OS10_HTAPI/HT.cpp` | Корректное закрытие: `UnmapViewOfFile` → `CloseHandle(FileMapping)` → `CloseHandle(File)` → `delete HTHANDLE` |
+| `OS10_HTAPI/HT.cpp` | `Open`: `CreateFile(OPEN_EXISTING)` → чтение заголовка → `CreateFileMapping` → `MapViewOfFile` → восстановление `HTHANDLE` |
+| `OS10_03/OS10_03.cpp` | Два независимых `HTHANDLE*` (`ht1`, `ht2`) — изоляция хранилищ |
+| `Tests/Tests.cpp` | 9 тест-кейсов: Create/Open, Insert/Get, Delete, Update, Snap, Collision Handling, Errors, Persistence, MaxSizes |
 
 ---
 
-## 9. Структура артефактов после сборки
+## 7. Структура артефактов после сборки и запуска
 
 ```
 lab2/windows/
@@ -288,22 +310,18 @@ lab2/windows/
 
 ---
 
-## 10. Ключевые места в коде для показа преподавателю
+## 8. Типовые ошибки и решения
 
-| Файл | Что показать |
-|---|---|
-| `OS10_HTAPI/HT.cpp` | `CreateFile` → `CreateFileMapping` → `MapViewOfFile` в `Create` |
-| `OS10_HTAPI/HT.cpp` | Компоновка памяти: заголовок + массив элементов |
-| `OS10_HTAPI/HT.cpp` | Хэш-функция (djb2) + линейное пробирование в `Insert`/`Get`/`Delete`/`Update` |
-| `OS10_HTAPI/HT.cpp` | `FlushViewOfFile` + `FlushFileBuffers` в `Snap` |
-| `OS10_HTAPI/HT.cpp` | Корректное закрытие: `UnmapViewOfFile` → `CloseHandle(FileMapping)` → `CloseHandle(File)` |
-| `OS10_HTAPI/HT.cpp` | `Open`: чтение заголовка, восстановление `HTHANDLE` |
-| `OS10_03/OS10_03.cpp` | Два независимых `HTHANDLE*`, изоляция данных |
-| `Tests/Tests.cpp` | 9 тест-кейсов, покрывающие все функции API |
+| Ошибка | Причина | Решение |
+|---|---|---|
+| `MSB8020: средства сборки v143 не найдены` | Нет тулсета v143 | В проекте `v145` — правильно, не менять |
+| `error C2169: div: подставляемая функция` | Конфликт с intrinsics | Флаг `/Oi-` в `AdditionalOptions` (уже прописан во всех `.vcxproj`) |
+| `LNK1104: не удалось открыть файл OS10_HTAPI.lib` | Библиотека не собрана или путь неверен | Собрать `OS10_HTAPI` первым, проверить `AdditionalLibraryDirectories` |
+| Кракозябры в консоли | Кодировка CP866 | `chcp 65001` перед запуском |
 
 ---
 
-## 11. Быстрый запуск всех демо подряд (из терминала VS)
+## 9. Быстрый запуск всех демо подряд
 
 ```cmd
 chcp 65001

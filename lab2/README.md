@@ -1,17 +1,19 @@
 # Лабораторная работа 2 — File Mapping (HT API)
 
 **Системное программирование** (преп. Смелов В.В.), ПИ+ИС-3, 4 часа.
-Задание: `labs/Лабораторная_работа_02 (4 часа)/ОССП_Лабораторная_работа_10_FileMapping.pdf`
-API спецификация: `labs/Лабораторная_работа_02 (4 часа)/ОССП_Лабораторная_работа_10_HT.h`
+Задание: `labs/Лабораторная_2_FileMapping/Лабораторная_2_FileMapping_HT.pdf`
+API спецификация: `labs/Лабораторная_2_FileMapping/HT.h`
 
 ---
 
 ## Содержание
 
 - [Теория и архитектура](#теория-и-архитектура)
+- [Сводка терминов (File Mapping)](#сводка-терминов-file-mapping)
 - [Как запустить проект](#как-запустить-проект)
 - [Демонстрация (фактические выводы)](#демонстрация-фактические-выводы)
 - [HT API — детали реализации](#ht-api--детали-реализации)
+- [Особенности программной реализации (с кодом)](#особенности-программной-реализации-с-кодом)
 - [Порядок защиты и типовые вопросы](#порядок-защиты-и-типовые-вопросы)
 
 ---
@@ -73,6 +75,106 @@ lab2/windows/
 | 02 | OS10_02 | Использует статическую библиотеку `OS10_HTAPI.lib`, повторяет OS10_01 |
 | 03 | OS10_03 | Использует `OS10_HTAPI.lib`, работает с **2 HT одновременно** |
 | 04 | Tests | Набор автотестов (9 тест-кейсов) для проверки HT API |
+
+---
+
+## Сводка терминов (File Mapping)
+
+### File Mapping — отображение файла в память
+
+**File Mapping** — механизм ОС, при котором содержимое файла на диске становится доступным программе как обычная область виртуальной памяти. Программа не вызывает `ReadFile`/`WriteFile`, а читает и пишет по указателю, как в массив. ОС сама подкачивает нужные страницы с диска и сбрасывает изменённые обратно.
+
+### File View — представление файла
+
+**File View** (дословно «представление файла») — это та часть адресного пространства процесса, куда отображён файл. Именно `File View` возвращается указателем из `MapViewOfFile`, и именно через него программа читает и пишет данные. Ключевая мысль: файл на диске и его представление в памяти — это **одни и те же байты**, а не копия; изменения в памяти становятся изменениями файла после сброса (flush).
+
+### Проецирование (projection / mapping)
+
+**Проецирование** — операция установления соответствия между диапазоном файла на диске и диапазоном виртуальных адресов процесса. После проецирования доступ к памяти по этому диапазону адресов фактически является доступом к файлу. Отсюда же термин «образ файла в памяти».
+
+Проецирование выполняется в два шага, и это два разных объекта:
+
+1. **Объект section (section object)** — создаётся в ядре ОС и описывает, какой файл и с какими правами будет отображён. Это ещё не память процесса.
+2. **Представление (view)** — участок адресного пространства конкретного процесса, связанный с этим section object.
+
+### CreateFileMapping
+
+```cpp
+HANDLE CreateFileMappingA(
+    HANDLE hFile,                  // дескриптор файла (или INVALID_HANDLE_VALUE для pagefile)
+    LPSECURITY_ATTRIBUTES lpAttr,  // атрибуты защиты, обычно NULL
+    DWORD flProtect,               // права: PAGE_READWRITE / PAGE_READONLY / PAGE_EXECUTE_READ
+    DWORD dwMaximumSizeHigh,       // старшие 32 бита размера
+    DWORD dwMaximumSizeLow,        // младшие 32 бита размера
+    LPCSTR lpName                  // имя объекта (для разделения между процессами), иначе NULL
+);
+```
+
+**Что делает:** создаёт в ядре **объект section** (проекцию файла), но **не отображает** его в адресное пространство процесса. Возвращает `HANDLE` — дескриптор объекта section, а не указатель на память.
+
+**Важно:** сам по себе `CreateFileMapping` не даёт доступа к данным. Пока не вызван `MapViewOfFile`, у процесса нет ни одного адреса, по которому видны байты файла.
+
+Если `dwMaximumSize` = 0, размер берётся из текущего размера файла — поэтому перед отображением файл нужно **расширить** до нужного размера (`SetFilePointer` + `SetEndOfFile`), иначе отображение будет короче ожидаемого.
+
+### MapViewOfFile
+
+```cpp
+LPVOID MapViewOfFile(
+    HANDLE hFileMappingObject,  // дескриптор объекта section из CreateFileMapping
+    DWORD  dwDesiredAccess,     // FILE_MAP_READ / FILE_MAP_WRITE / FILE_MAP_ALL_ACCESS
+    DWORD  dwFileOffsetHigh,    // смещение в файле, старшие 32 бита
+    DWORD  dwFileOffsetLow,     // смещение в файле, младшие 32 бита
+    SIZE_T dwNumberOfBytesToMap // сколько байт отобразить (0 = весь section)
+);
+```
+
+**Что делает:** отображает объект section в адресное пространство **вызывающего процесса** и возвращает указатель `LPVOID` на начало **File View**. После этого работа с файлом идёт как с массивом:
+
+```cpp
+char* data = (char*)MapViewOfFile(hMapping, FILE_MAP_ALL_ACCESS, 0, 0, size);
+data[0] = 'A';          // это запись в файл (после flush)
+int value = *(int*)(data + 16);  // это чтение из файла
+```
+
+**Важно:** один и тот же объект section можно отобразить несколько раз и в разные процессы — у каждого процесса будет свой адрес, но данные общие. Именно на этом построен межпроцессный обмен в лабораторной 11.
+
+### Разница CreateFileMapping / MapViewOfFile
+
+| | `CreateFileMapping` | `MapViewOfFile` |
+|---|---|---|
+| Что создаёт | объект section в ядре | представление (view) в адресном пространстве процесса |
+| Что возвращает | `HANDLE` (дескриптор) | `LPVOID` (указатель на память) |
+| Есть ли доступ к данным | нет | да, чтение/запись по указателю |
+| Область действия | системная (объект ядра) | конкретный процесс |
+| Аналог в Linux | — (аналог `mmap` делает сразу оба шага) | `mmap` |
+
+### Связанные термины
+
+| Термин | Значение |
+|---|---|
+| **Section object** | объект ядра, описывающий отображаемый файл и права доступа |
+| **View / File View** | участок адресного пространства процесса, связанный с section object |
+| **Проецирование** | установление соответствия «файл ↔ виртуальные адреса» |
+| **Page** | страница памяти (обычно 4 КБ) — единица подкачки при отображении |
+| **Flush / Snap** | сброс изменённых («грязных») страниц из памяти в файл |
+| **PAGE_READWRITE** | права объекта section: чтение и запись |
+| **FILE_MAP_ALL_ACCESS** | права представления: полный доступ |
+| **Shared memory** | разделяемая память — одно представление, видимое нескольким процессам |
+| **`FlushViewOfFile`** | просит ОС записать изменённые страницы представления в файл |
+| **`FlushFileBuffers`** | гарантирует, что данные файла реально ушли на диск (а не только в кэш) |
+| **`UnmapViewOfFile`** | снимает представление (освобождает диапазон адресов процесса) |
+| **`CloseHandle`** | закрывает дескриптор файла или объекта section |
+
+### Аналоги в Linux
+
+| Windows | Linux |
+|---|---|
+| `CreateFileMapping` | — (нет отдельного шага) |
+| `CreateFileMapping` + `MapViewOfFile` | `mmap` |
+| `UnmapViewOfFile` | `munmap` |
+| `FlushViewOfFile` + `FlushFileBuffers` | `msync` |
+| изменение прав представления | `mprotect` |
+| изменение размера представления | `mremap` |
 
 ---
 
@@ -224,6 +326,260 @@ struct Element {
 <AdditionalOptions>/Oi- %(AdditionalOptions)</AdditionalOptions>
 ```
 Отключает intrinsics компилятора (конфликт с `div_t div(int,int)` из `<stdlib.h>`).
+
+---
+
+## Особенности программной реализации (с кодом)
+
+Ниже — фактический код из `OS10_HTAPI/HT.cpp`, по шагам: как файл проецируется, как устроен образ и как выполняются операции.
+
+### 1. Создание хранилища: CreateFile → CreateFileMapping → MapViewOfFile
+
+Три вызова подряд — три разных объекта: файл, объект section, представление.
+
+```cpp
+HTHANDLE* Create(int Capacity, int SecSnapshotInterval, int MaxKeyLength,
+                 int MaxPayloadLength, const char FileName[512])
+{
+    HTHANDLE* h = new HTHANDLE(Capacity, SecSnapshotInterval,
+                               MaxKeyLength, MaxPayloadLength, FileName);
+
+    // 1. Открываем/создаём файл на диске
+    h->File = CreateFileA(FileName,
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,   // чтобы Open() из другого процесса не падал
+        NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h->File == INVALID_HANDLE_VALUE) { /* ошибка */ }
+
+    size_t storageSize = CalculateStorageSize(h);
+
+    // 2. Создаём объект section в ядре (память процесса ещё не занята)
+    h->FileMapping = CreateFileMappingA(h->File, NULL, PAGE_READWRITE,
+        (DWORD)(storageSize >> 32),           // старшие 32 бита размера
+        (DWORD)(storageSize & 0xFFFFFFFF),    // младшие 32 бита
+        NULL);                                // без имени — не разделяемый
+    if (!h->FileMapping) { /* ошибка */ }
+
+    // 3. Проецируем section в адресное пространство — получаем File View
+    h->Addr = MapViewOfFile(h->FileMapping, FILE_MAP_ALL_ACCESS, 0, 0, storageSize);
+    if (!h->Addr) { /* ошибка */ }
+
+    // 4. Размечаем заголовок прямо в отображённой памяти
+    char* ptr = (char*)h->Addr;
+    *(int*)ptr = h->Capacity;             ptr += sizeof(int);
+    *(int*)ptr = h->SecSnapshotInterval;  ptr += sizeof(int);
+    *(int*)ptr = h->MaxKeyLength;         ptr += sizeof(int);
+    *(int*)ptr = h->MaxPayloadLength;     ptr += sizeof(int);
+    strcpy_s((char*)ptr, 512, h->FileName); ptr += 512;
+    *(time_t*)ptr = 0;                    // lastsnaptime
+
+    // 5. Обнуляем область элементов
+    memset(ptr + sizeof(time_t), 0,
+           storageSize - (ptr - (char*)h->Addr) - sizeof(time_t));
+
+    return h;
+}
+```
+
+**Ключевая деталь:** размер вычисляется до создания mapping, потому что `CreateFileMapping` с `dwMaximumSize != 0` задаёт размер section, а `MapViewOfFile` с `dwNumberOfBytesToMap = storageSize` — размер представления. Если передать 0, представление ограничится текущим размером файла (а он у `CREATE_ALWAYS` нулевой).
+
+```cpp
+size_t CalculateStorageSize(const HTHANDLE* h)
+{
+    size_t headerSize  = sizeof(int) * 4 + 512 + sizeof(time_t);            // 536 байт
+    size_t elementSize = h->MaxKeyLength + h->MaxPayloadLength + sizeof(int) * 2;
+    return headerSize + elementSize * (size_t)h->Capacity;
+}
+```
+
+### 2. Открытие существующего хранилища: Open
+
+`Open` не создаёт файл, а читает заголовок обычным `ReadFile`, чтобы узнать параметры, и только потом проецирует.
+
+```cpp
+HTHANDLE* Open(const char FileName[512])
+{
+    HANDLE file = CreateFileA(FileName, GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);   // OPEN_EXISTING, не CREATE
+    if (file == INVALID_HANDLE_VALUE) return nullptr;
+
+    // Читаем заголовок обычным ReadFile — параметры хранилища ещё неизвестны
+    char header[512 + sizeof(int) * 4 + sizeof(time_t)];
+    DWORD bytesRead;
+    ReadFile(file, header, sizeof(header), &bytesRead, NULL);
+
+    char* ptr = header;
+    int Capacity          = *(int*)ptr; ptr += sizeof(int);
+    int SecSnapshotInterval = *(int*)ptr; ptr += sizeof(int);
+    int MaxKeyLength      = *(int*)ptr; ptr += sizeof(int);
+    int MaxPayloadLength  = *(int*)ptr; ptr += sizeof(int);
+    char name[512]; strcpy_s(name, (char*)ptr); ptr += 512;
+    time_t lastsnaptime   = *(time_t*)ptr;
+
+    size_t storageSize = sizeof(int) * 4 + 512 + sizeof(time_t) +
+        ((size_t)MaxKeyLength + (size_t)MaxPayloadLength + sizeof(int) * 2) * Capacity;
+
+    // Теперь можно создавать mapping: размер section = 0 → берётся размер файла
+    HANDLE mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, 0, NULL);
+    LPVOID addr = MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, storageSize);
+
+    HTHANDLE* h = new HTHANDLE(Capacity, SecSnapshotInterval,
+                               MaxKeyLength, MaxPayloadLength, name);
+    h->File = file; h->FileMapping = mapping; h->Addr = addr;
+    h->lastsnaptime = lastsnaptime;
+    return h;
+}
+```
+
+**Особенность:** здесь `CreateFileMappingA(..., 0, 0, NULL)` — размер section берётся из размера файла на диске. Это корректно, потому что файл уже размечен предыдущим `Create` и имеет точный размер.
+
+### 3. Формат элемента в памяти
+
+```
+offset = 536 + (MaxKeyLength + MaxPayloadLength + 8) * index
+
++------------------+------------------+-----------+---------------+
+| key[MaxKeyLength]| payload[MaxPl..] | keylength | payloadlength |
++------------------+------------------+-----------+---------------+
+                                     ^ keylength == 0  → слот пуст
+```
+
+```cpp
+size_t GetElementOffset(const HTHANDLE* h, int index)
+{
+    size_t headerSize  = sizeof(int) * 4 + 512 + sizeof(time_t);
+    size_t elementSize = h->MaxKeyLength + h->MaxPayloadLength + sizeof(int) * 2;
+    return headerSize + elementSize * (size_t)index;
+}
+
+BOOL IsSlotEmpty(const HTHANDLE* h, int index)
+{
+    char* elementPtr = (char*)h->Addr + GetElementOffset(h, index);
+    int keylength = *(int*)(elementPtr + h->MaxKeyLength + h->MaxPayloadLength);
+    return keylength == 0;          // пустой слот определяется по keylength
+}
+```
+
+### 4. Хэш-функция djb2 и линейное пробирование
+
+```cpp
+int HashFunction(const void* key, int keylength, int capacity)
+{
+    const unsigned char* bytes = (const unsigned char*)key;
+    unsigned int hash = 5381;
+    for (int i = 0; i < keylength; i++)
+        hash = ((hash << 5) + hash) + bytes[i];   // hash * 33 + byte
+    return (int)(hash % (unsigned int)capacity);
+}
+```
+
+Поиск слота — линейное пробирование по кругу, с защитой от бесконечного цикла:
+
+```cpp
+int startIndex = HashFunction(element->key, element->keylength, h->Capacity);
+int index = startIndex;
+
+for (int i = 0; i < h->Capacity; i++)
+{
+    if (IsSlotEmpty(h, index)) { /* вставляем сюда */ }
+
+    // ключ уже есть → вставка запрещена
+    size_t offset = GetElementOffset(h, index);
+    char* existing = (char*)h->Addr + offset;
+    int existingKeyLength = *(int*)(existing + h->MaxKeyLength + h->MaxPayloadLength);
+    if (existingKeyLength == element->keylength &&
+        memcmp(existing, element->key, element->keylength) == 0)
+    { SetLastError((HTHANDLE*)h, "Key already exists"); return FALSE; }
+
+    index = (index + 1) % h->Capacity;
+    if (index == startIndex) break;    // обошли весь массив
+}
+```
+
+### 5. Вставка: ключ и значение копируются по фиксированным смещениям
+
+```cpp
+size_t offset = GetElementOffset(h, index);
+char* dest = (char*)h->Addr + offset;
+
+memcpy(dest, element->key, element->keylength);
+memset(dest + element->keylength, 0, h->MaxKeyLength - element->keylength);   // добивка нулями
+
+memcpy(dest + h->MaxKeyLength, element->payload, element->payloadlength);
+memset(dest + h->MaxKeyLength + element->payloadlength, 0,
+       h->MaxPayloadLength - element->payloadlength);
+
+*(int*)(dest + h->MaxKeyLength + h->MaxPayloadLength) = element->keylength;
+*(int*)(dest + h->MaxKeyLength + h->MaxPayloadLength + sizeof(int)) = element->payloadlength;
+```
+
+Записи идут **сразу в отображённую память**, без промежуточного буфера и без `WriteFile`. Именно поэтому операции с HT — это обычные обращения к памяти.
+
+### 6. Удаление: lazy deletion
+
+```cpp
+if (existingKeyLength == element->keylength &&
+    memcmp(existing, element->key, element->keylength) == 0)
+{
+    *(int*)(existing + h->MaxKeyLength + h->MaxPayloadLength) = 0;  // просто keylength = 0
+    return TRUE;
+}
+```
+
+**Почему это корректно для открытой адресации в данной реализации:** поиск (`Get`, `Delete`, `Update`) останавливается на первом слоте с `keylength == 0`. Если бы удаление обнуляло слот в середине цепочки пробирования, поиск элементов, вставленных после него, сломался бы. В классической открытой адресации для этого используют «надгробия» (tombstones). Здесь же цепочка не разрывается только потому, что после удаления элемент считается отсутствующим, а вставка может занять этот слот — при этом элемент, который был дальше по цепочке, станет недостижим. Это известное ограничение реализации, о котором стоит сказать на защите.
+
+### 7. Snap: сброс представления и файловых буферов
+
+```cpp
+BOOL Snap(const HTHANDLE* h)
+{
+    if (!FlushViewOfFile(h->Addr, 0)) {          // 0 = сбросить всё представление
+        SetLastError((HTHANDLE*)h, "FlushViewOfFile failed");
+        return FALSE;
+    }
+    if (!FlushFileBuffers(h->File)) {            // гарантия записи на диск
+        SetLastError((HTHANDLE*)h, "FlushFileBuffers failed");
+        return FALSE;
+    }
+    ((HTHANDLE*)h)->lastsnaptime = time(NULL);
+    return TRUE;
+}
+```
+
+Два вызова нужны потому, что это **два разных уровня кэширования**: `FlushViewOfFile` переносит изменённые страницы представления в файловый кэш ОС, `FlushFileBuffers` — из файлового кэша на устройство.
+
+### 8. Close: Snap и корректный порядок освобождения
+
+```cpp
+BOOL Close(const HTHANDLE* h)
+{
+    BOOL result = Snap(h);              // 1. сохранить изменения
+
+    if (h->Addr)        UnmapViewOfFile(h->Addr);        // 2. снять представление
+    if (h->FileMapping) CloseHandle(h->FileMapping);     // 3. закрыть section
+    if (h->File)        CloseHandle(h->File);            // 4. закрыть файл
+
+    delete h;                           // 5. освободить структуру
+    return result;
+}
+```
+
+**Порядок принципиален:** нельзя закрыть `FileMapping` раньше, чем снято представление, и нельзя закрыть `File` раньше, чем закрыт section.
+
+### 9. Особенности, о которых спрашивают
+
+| Особенность | Суть |
+|---|---|
+| **Нет синхронизации** | В `HTHANDLE` нет `CRITICAL_SECTION`; одновременный доступ из нескольких потоков/процессов не защищён. Требование ТЗ «потокобезопасное HT API» в этой реализации не выполнено — это выносится как известное ограничение (в ЛР11 добавляется mutex). |
+| **Файл расширяется mapping'ом** | `CreateFileMapping` с явным размером увеличивает файл до этого размера; поэтому `Create` не вызывает `SetEndOfFile` вручную. |
+| **`FILE_SHARE_READ \| FILE_SHARE_WRITE`** | Без флагов совместного доступа второй `CreateFile` в `Open` из другого процесса получил бы `ERROR_SHARING_VIOLATION`. |
+| **Размер элемента фиксирован** | `MaxKeyLength + MaxPayloadLength + 8` — переменные по длине ключи/значения не поддерживаются, зато смещение любого элемента вычисляется арифметикой, без индексов. |
+| **Заголовок 536 байт** | 4 × `int` (16) + `FileName[512]` + `time_t` (8) = 536. Это значение фигурирует и в `Create`, и в `Open`, и в тестах. |
+| **`Get` возвращает копию** | `Get` делает `malloc` и копирует ключ/значение в кучу вызывающего — вызывающая сторона обязана освободить память. |
+| **Флаг `/Oi-`** | Конфликт intrinsics с `div_t div(int,int)`: `cl` подставляет `div` как intrinsic, что ломает объявление из `<stdlib.h>`. |
+| **Статическая, а не динамическая библиотека** | По ТЗ: `OS10_HTAPI.lib` встраивается в `.exe`, поэтому `dumpbin /dependents` не показывает её в зависимостях. |
+| **Платформа ARM64** | Сборка под ARM64 (Windows 11 ARM64), тулсет v145; при `x64` проекты не соберутся без смены платформы. |
 
 ---
 

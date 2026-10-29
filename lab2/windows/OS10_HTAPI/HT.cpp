@@ -1,5 +1,6 @@
 #include "HT.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -7,18 +8,22 @@ namespace HT
 {
 	HTHANDLE::HTHANDLE()
 		: Capacity(0), SecSnapshotInterval(0), MaxKeyLength(0), MaxPayloadLength(0),
-		File(nullptr), FileMapping(nullptr), Addr(nullptr), lastsnaptime(0)
+		File(nullptr), FileMapping(nullptr), Addr(nullptr), lastsnaptime(0),
+		SnapThread(nullptr), StopEvent(nullptr), snapshotsmade(0)
 	{
 		FileName[0] = '\0';
 		LastErrorMessage[0] = '\0';
+		InitializeCriticalSection(&cs);
 	}
 
 	HTHANDLE::HTHANDLE(int capacity, int secSnapshotInterval, int maxKeyLength, int maxPayloadLength, const char fileName[512])
 		: Capacity(capacity), SecSnapshotInterval(secSnapshotInterval), MaxKeyLength(maxKeyLength), MaxPayloadLength(maxPayloadLength),
-		File(nullptr), FileMapping(nullptr), Addr(nullptr), lastsnaptime(0)
+		File(nullptr), FileMapping(nullptr), Addr(nullptr), lastsnaptime(0),
+		SnapThread(nullptr), StopEvent(nullptr), snapshotsmade(0)
 	{
 		strcpy_s(FileName, fileName);
 		LastErrorMessage[0] = '\0';
+		InitializeCriticalSection(&cs);
 	}
 
 	Element::Element()
@@ -47,9 +52,121 @@ namespace HT
 
 	size_t CalculateStorageSize(const HTHANDLE* h)
 	{
-		size_t headerSize = sizeof(int) * 4 + 512 + sizeof(time_t); // Capacity, SecSnapshotInterval, MaxKeyLength, MaxPayloadLength, FileName, lastsnaptime
-		size_t elementSize = (size_t)h->MaxKeyLength + (size_t)h->MaxPayloadLength + sizeof(int) * 2; // key, payload, keylength, payloadlength
+		size_t headerSize = sizeof(int) * 4 + 512 + sizeof(time_t);
+		size_t elementSize = (size_t)h->MaxKeyLength + (size_t)h->MaxPayloadLength + sizeof(int) * 2;
 		return headerSize + elementSize * (size_t)h->Capacity;
+	}
+
+	size_t GetElementOffset(const HTHANDLE* h, int index)
+	{
+		size_t headerSize = sizeof(int) * 4 + 512 + sizeof(time_t);
+		size_t elementSize = (size_t)h->MaxKeyLength + (size_t)h->MaxPayloadLength + sizeof(int) * 2;
+		return headerSize + elementSize * (size_t)index;
+	}
+
+	BOOL IsSlotEmpty(const HTHANDLE* h, int index)
+	{
+		size_t offset = GetElementOffset(h, index);
+		char* elementPtr = (char*)h->Addr + offset;
+		int keylength = *(int*)(elementPtr + h->MaxKeyLength + h->MaxPayloadLength);
+		return keylength == 0;
+	}
+
+	int HashFunction(const void* key, int keylength, int capacity)
+	{
+		const unsigned char* bytes = (const unsigned char*)key;
+		unsigned int hash = 5381;
+		for (int i = 0; i < keylength; i++)
+		{
+			hash = ((hash << 5) + hash) + bytes[i];
+		}
+		return (int)(hash % (unsigned int)capacity);
+	}
+
+	static BOOL SnapInternal(HTHANDLE* h)
+	{
+		if (!h || !h->Addr || !h->FileMapping || !h->File)
+		{
+			return FALSE;
+		}
+
+		if (!FlushViewOfFile(h->Addr, 0))
+		{
+			SetLastError(h, "FlushViewOfFile failed");
+			return FALSE;
+		}
+
+		if (!FlushFileBuffers(h->File))
+		{
+			SetLastError(h, "FlushFileBuffers failed");
+			return FALSE;
+		}
+
+		h->lastsnaptime = time(NULL);
+		h->snapshotsmade++;
+		return TRUE;
+	}
+
+	static DWORD WINAPI SnapshotThreadProc(LPVOID parameter)
+	{
+		HTHANDLE* h = (HTHANDLE*)parameter;
+		int seconds = (h->SecSnapshotInterval > 0) ? h->SecSnapshotInterval : 1;
+		DWORD intervalMs = (DWORD)seconds * 1000;
+
+		for (;;)
+		{
+			DWORD wait = WaitForSingleObject(h->StopEvent, intervalMs);
+			if (wait != WAIT_TIMEOUT)
+			{
+				break;
+			}
+
+			EnterCriticalSection(&h->cs);
+			SnapInternal(h);
+			LeaveCriticalSection(&h->cs);
+		}
+		return 0;
+	}
+
+	static BOOL StartSnapshotThread(HTHANDLE* h)
+	{
+		if (h->SecSnapshotInterval <= 0)
+		{
+			return TRUE;
+		}
+
+		h->StopEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
+		if (!h->StopEvent)
+		{
+			SetLastError(h, "CreateEvent failed");
+			return FALSE;
+		}
+
+		h->SnapThread = CreateThread(NULL, 0, SnapshotThreadProc, h, 0, NULL);
+		if (!h->SnapThread)
+		{
+			SetLastError(h, "CreateThread failed");
+			CloseHandle(h->StopEvent);
+			h->StopEvent = nullptr;
+			return FALSE;
+		}
+		return TRUE;
+	}
+
+	static void StopSnapshotThread(HTHANDLE* h)
+	{
+		if (h->SnapThread)
+		{
+			SetEvent(h->StopEvent);
+			WaitForSingleObject(h->SnapThread, 5000);
+			CloseHandle(h->SnapThread);
+			h->SnapThread = nullptr;
+		}
+		if (h->StopEvent)
+		{
+			CloseHandle(h->StopEvent);
+			h->StopEvent = nullptr;
+		}
 	}
 
 	HTHANDLE* Create(int Capacity, int SecSnapshotInterval, int MaxKeyLength, int MaxPayloadLength, const char FileName[512])
@@ -74,6 +191,7 @@ namespace HT
 		if (h->File == INVALID_HANDLE_VALUE)
 		{
 			SetLastError(h, "CreateFile failed");
+			DeleteCriticalSection(&h->cs);
 			delete h;
 			return nullptr;
 		}
@@ -93,6 +211,7 @@ namespace HT
 		{
 			SetLastError(h, "CreateFileMapping failed");
 			CloseHandle(h->File);
+			DeleteCriticalSection(&h->cs);
 			delete h;
 			return nullptr;
 		}
@@ -103,23 +222,34 @@ namespace HT
 			SetLastError(h, "MapViewOfFile failed");
 			CloseHandle(h->FileMapping);
 			CloseHandle(h->File);
+			DeleteCriticalSection(&h->cs);
 			delete h;
 			return nullptr;
 		}
 
-		// Initialize the storage header
 		char* ptr = (char*)h->Addr;
 		*(int*)ptr = h->Capacity; ptr += sizeof(int);
 		*(int*)ptr = h->SecSnapshotInterval; ptr += sizeof(int);
 		*(int*)ptr = h->MaxKeyLength; ptr += sizeof(int);
 		*(int*)ptr = h->MaxPayloadLength; ptr += sizeof(int);
 		strcpy_s((char*)ptr, 512, h->FileName); ptr += 512;
-		*(time_t*)ptr = 0; // lastsnaptime
+		*(time_t*)ptr = 0;
 
-		// Initialize elements area (zero out)
 		memset(ptr + sizeof(time_t), 0, storageSize - (ptr - (char*)h->Addr) - sizeof(time_t));
 
 		h->lastsnaptime = 0;
+
+		if (!StartSnapshotThread(h))
+		{
+			SetLastError(h, "Async snapshot thread failed");
+			UnmapViewOfFile(h->Addr);
+			CloseHandle(h->FileMapping);
+			CloseHandle(h->File);
+			DeleteCriticalSection(&h->cs);
+			delete h;
+			return nullptr;
+		}
+
 		return h;
 	}
 
@@ -145,7 +275,6 @@ namespace HT
 			return nullptr;
 		}
 
-		// Read header to get storage size
 		char header[512 + sizeof(int) * 4 + sizeof(time_t)];
 		DWORD bytesRead;
 		if (!ReadFile(file, header, sizeof(header), &bytesRead, NULL))
@@ -163,7 +292,7 @@ namespace HT
 		strcpy_s(name, (char*)ptr); ptr += 512;
 		time_t lastsnaptime = *(time_t*)ptr;
 
-		size_t storageSize = sizeof(int) * 4 + 512 + sizeof(time_t) + 
+		size_t storageSize = sizeof(int) * 4 + 512 + sizeof(time_t) +
 			((size_t)MaxKeyLength + (size_t)MaxPayloadLength + sizeof(int) * 2) * (size_t)Capacity;
 
 		HANDLE mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, 0, NULL);
@@ -186,30 +315,33 @@ namespace HT
 		h->FileMapping = mapping;
 		h->Addr = addr;
 		h->lastsnaptime = lastsnaptime;
+
+		if (!StartSnapshotThread(h))
+		{
+			SetLastError(h, "Async snapshot thread failed");
+			UnmapViewOfFile(h->Addr);
+			CloseHandle(h->FileMapping);
+			CloseHandle(h->File);
+			DeleteCriticalSection(&h->cs);
+			delete h;
+			return nullptr;
+		}
+
 		return h;
 	}
 
 	BOOL Snap(const HTHANDLE* h)
 	{
-		if (!h || !h->Addr || !h->FileMapping)
+		if (!h)
 		{
 			return FALSE;
 		}
 
-		if (!FlushViewOfFile(h->Addr, 0))
-		{
-			SetLastError((HTHANDLE*)h, "FlushViewOfFile failed");
-			return FALSE;
-		}
-
-		if (!FlushFileBuffers(h->File))
-		{
-			SetLastError((HTHANDLE*)h, "FlushFileBuffers failed");
-			return FALSE;
-		}
-
-		((HTHANDLE*)h)->lastsnaptime = time(NULL);
-		return TRUE;
+		HTHANDLE* mh = (HTHANDLE*)h;
+		EnterCriticalSection(&mh->cs);
+		BOOL result = SnapInternal(mh);
+		LeaveCriticalSection(&mh->cs);
+		return result;
 	}
 
 	BOOL Close(const HTHANDLE* h)
@@ -219,60 +351,41 @@ namespace HT
 			return FALSE;
 		}
 
+		HTHANDLE* mh = (HTHANDLE*)h;
+
+		StopSnapshotThread(mh);
+
 		BOOL result = TRUE;
-		if (!Snap(h))
+		EnterCriticalSection(&mh->cs);
+		if (!SnapInternal(mh))
 		{
 			result = FALSE;
 		}
 
-		if (h->Addr)
+		if (mh->Addr)
 		{
-			UnmapViewOfFile(h->Addr);
+			UnmapViewOfFile(mh->Addr);
 		}
-		if (h->FileMapping)
+		if (mh->FileMapping)
 		{
-			CloseHandle(h->FileMapping);
+			CloseHandle(mh->FileMapping);
 		}
-		if (h->File && h->File != INVALID_HANDLE_VALUE)
+		if (mh->File && mh->File != INVALID_HANDLE_VALUE)
 		{
-			CloseHandle(h->File);
+			CloseHandle(mh->File);
 		}
 
-		((HTHANDLE*)h)->Addr = nullptr;
-		((HTHANDLE*)h)->FileMapping = nullptr;
-		((HTHANDLE*)h)->File = nullptr;
+		mh->Addr = nullptr;
+		mh->FileMapping = nullptr;
+		mh->File = nullptr;
+		LeaveCriticalSection(&mh->cs);
 
-		delete h;
+		DeleteCriticalSection(&mh->cs);
+		delete mh;
 		return result;
 	}
 
-	size_t GetElementOffset(const HTHANDLE* h, int index)
-	{
-		size_t headerSize = sizeof(int) * 4 + 512 + sizeof(time_t);
-		size_t elementSize = (size_t)h->MaxKeyLength + (size_t)h->MaxPayloadLength + sizeof(int) * 2;
-		return headerSize + elementSize * (size_t)index;
-	}
-
-	BOOL IsSlotEmpty(const HTHANDLE* h, int index)
-	{
-		size_t offset = GetElementOffset(h, index);
-		char* elementPtr = (char*)h->Addr + offset;
-		int keylength = *(int*)(elementPtr + h->MaxKeyLength + h->MaxPayloadLength);
-		return keylength == 0;
-	}
-
-	int HashFunction(const void* key, int keylength, int capacity)
-	{
-		const unsigned char* bytes = (const unsigned char*)key;
-		unsigned int hash = 5381;
-		for (int i = 0; i < keylength; i++)
-		{
-			hash = ((hash << 5) + hash) + bytes[i]; // hash * 33 + c
-		}
-		return (int)(hash % (unsigned int)capacity);
-	}
-
-	BOOL Insert(const HTHANDLE* h, const Element* element)
+	static BOOL InsertInternal(const HTHANDLE* h, const Element* element)
 	{
 		if (!h || !element || !element->key || element->keylength <= 0 || element->keylength > h->MaxKeyLength ||
 			!element->payload || element->payloadlength <= 0 || element->payloadlength > h->MaxPayloadLength)
@@ -303,7 +416,6 @@ namespace HT
 				return TRUE;
 			}
 
-			// Check if key already exists
 			size_t offset = GetElementOffset(h, index);
 			char* existing = (char*)h->Addr + offset;
 			int existingKeyLength = *(int*)(existing + h->MaxKeyLength + h->MaxPayloadLength);
@@ -324,7 +436,7 @@ namespace HT
 		return FALSE;
 	}
 
-	BOOL Delete(const HTHANDLE* h, const Element* element)
+	static BOOL DeleteInternal(const HTHANDLE* h, const Element* element)
 	{
 		if (!h || !element || !element->key || element->keylength <= 0)
 		{
@@ -349,7 +461,6 @@ namespace HT
 
 			if (existingKeyLength == element->keylength && memcmp(existing, element->key, element->keylength) == 0)
 			{
-				// Mark as empty by setting keylength to 0
 				*(int*)(existing + h->MaxKeyLength + h->MaxPayloadLength) = 0;
 				return TRUE;
 			}
@@ -365,7 +476,7 @@ namespace HT
 		return FALSE;
 	}
 
-	Element* Get(const HTHANDLE* h, const Element* element)
+	static Element* GetInternal(const HTHANDLE* h, const Element* element)
 	{
 		if (!h || !element || !element->key || element->keylength <= 0)
 		{
@@ -414,7 +525,7 @@ namespace HT
 		return nullptr;
 	}
 
-	BOOL Update(const HTHANDLE* h, const Element* oldElement, const void* newPayload, int newPayloadLength)
+	static BOOL UpdateInternal(const HTHANDLE* h, const Element* oldElement, const void* newPayload, int newPayloadLength)
 	{
 		if (!h || !oldElement || !oldElement->key || oldElement->keylength <= 0 ||
 			!newPayload || newPayloadLength <= 0 || newPayloadLength > h->MaxPayloadLength)
@@ -455,6 +566,62 @@ namespace HT
 
 		SetLastError((HTHANDLE*)h, "Key not found");
 		return FALSE;
+	}
+
+	BOOL Insert(const HTHANDLE* h, const Element* element)
+	{
+		if (!h)
+		{
+			return FALSE;
+		}
+
+		HTHANDLE* mh = (HTHANDLE*)h;
+		EnterCriticalSection(&mh->cs);
+		BOOL result = InsertInternal(h, element);
+		LeaveCriticalSection(&mh->cs);
+		return result;
+	}
+
+	BOOL Delete(const HTHANDLE* h, const Element* element)
+	{
+		if (!h)
+		{
+			return FALSE;
+		}
+
+		HTHANDLE* mh = (HTHANDLE*)h;
+		EnterCriticalSection(&mh->cs);
+		BOOL result = DeleteInternal(h, element);
+		LeaveCriticalSection(&mh->cs);
+		return result;
+	}
+
+	Element* Get(const HTHANDLE* h, const Element* element)
+	{
+		if (!h)
+		{
+			return nullptr;
+		}
+
+		HTHANDLE* mh = (HTHANDLE*)h;
+		EnterCriticalSection(&mh->cs);
+		Element* result = GetInternal(h, element);
+		LeaveCriticalSection(&mh->cs);
+		return result;
+	}
+
+	BOOL Update(const HTHANDLE* h, const Element* oldElement, const void* newPayload, int newPayloadLength)
+	{
+		if (!h)
+		{
+			return FALSE;
+		}
+
+		HTHANDLE* mh = (HTHANDLE*)h;
+		EnterCriticalSection(&mh->cs);
+		BOOL result = UpdateInternal(h, oldElement, newPayload, newPayloadLength);
+		LeaveCriticalSection(&mh->cs);
+		return result;
 	}
 
 	char* GetLastError(HTHANDLE* ht)

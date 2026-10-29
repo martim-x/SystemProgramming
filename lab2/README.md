@@ -407,6 +407,26 @@ msbuild lab2.sln -restore /t:Rebuild /p:Configuration=Release /p:Platform=ARM64 
 | `OS10_03.exe` | `OS10_03\OS10_03\ARM64\Release\` |
 | `Tests.exe` | `Tests\Tests\ARM64\Release\` |
 
+### Как проекты видят библиотеку
+
+`OS10_02`, `OS10_03` и `Tests` ссылаются на `OS10_HTAPI` **как на проект**, а не через настройки компоновщика:
+
+```xml
+<ItemGroup>
+  <ProjectReference Include="..\OS10_HTAPI\OS10_HTAPI.vcxproj">
+    <Project>{1A7C4E20-0B31-4C7D-9E11-000000000010}</Project>
+  </ProjectReference>
+</ItemGroup>
+```
+
+Это даёт три вещи, которых не было при ручной линковке через `AdditionalDependencies`:
+
+1. **Порядок сборки** — MSBuild сам соберёт `OS10_HTAPI` раньше зависимых проектов. Не нужно предварительно собирать библиотеку вручную.
+2. **Путь к `.lib`** — берётся из `OutDir` проекта-цели, `AdditionalLibraryDirectories` не нужен.
+3. **Обновление** — изменение в библиотеке автоматически вызывает перелинковку зависимых приложений.
+
+Директории заголовков (`AdditionalIncludeDirectories = ..\OS10_HTAPI`) остаются вручную: `ProjectReference` в C++ не добавляет include-пути — только линковку и порядок сборки.
+
 ---
 
 ## Демонстрация (фактические выводы)

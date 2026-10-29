@@ -15,6 +15,7 @@ API спецификация: `labs/Лабораторная_2_FileMapping/HT.h`
 - [Демонстрация (фактические выводы)](#демонстрация-фактические-выводы)
 - [HT API — детали реализации](#ht-api--детали-реализации)
 - [Особенности программной реализации (с кодом)](#особенности-программной-реализации-с-кодом)
+- [Разбор реализации: Insert, Update, Delete](#разбор-реализации-insert-update-delete)
 - [Порядок защиты и типовые вопросы](#порядок-защиты-и-типовые-вопросы)
 
 ---
@@ -853,6 +854,264 @@ BOOL Close(const HTHANDLE* h)
 | **Флаг `/Oi-`** | Конфликт intrinsics с `div_t div(int,int)`: `cl` подставляет `div` как intrinsic, что ломает объявление из `<stdlib.h>`. |
 | **Статическая, а не динамическая библиотека** | По ТЗ: `OS10_HTAPI.lib` встраивается в `.exe`, поэтому `dumpbin /dependents` не показывает её в зависимостях. |
 | **Платформа ARM64** | Сборка под ARM64 (Windows 11 ARM64), тулсет v145; при `x64` проекты не соберутся без смены платформы. |
+
+---
+
+## Разбор реализации: Insert, Update, Delete
+
+Три функции-мутатора. У них общий каркас (валидация → хэш → линейное пробирование → работа со слотом), но разная семантика записи.
+
+### Общий каркас (все три функции)
+
+```
+1. Проверка параметров          → при ошибке SetLastError + FALSE/nullptr
+2. startIndex = djb2(key) % Capacity
+3. Линейное пробирование        → до Capacity шагов, с заворотом на 0
+4. Работа со слотом по offset   → key[], payload[], keylength, payloadlength
+```
+
+Адрес слота считается арифметикой, без индексов и поиска:
+
+```cpp
+offset = 536 + (MaxKeyLength + MaxPayloadLength + 8) * index
+```
+
+---
+
+### Insert — вставка нового элемента
+
+```cpp
+BOOL Insert(const HTHANDLE* h, const Element* element)
+```
+
+#### Шаг 1. Валидация — 7 условий в одном `if`
+
+```cpp
+if (!h || !element || !element->key || element->keylength <= 0 ||
+    element->keylength > h->MaxKeyLength || !element->payload ||
+    element->payloadlength <= 0 || element->payloadlength > h->MaxPayloadLength)
+{
+    SetLastError((HTHANDLE*)h, "Invalid parameters for Insert");
+    return FALSE;
+}
+```
+
+| Условие | Что ловит |
+|---|---|
+| `!h` | невалидный дескриптор хранилища |
+| `!element` | передан `nullptr` вместо элемента |
+| `!element->key` | ключ не задан |
+| `keylength <= 0` | пустой ключ |
+| `keylength > MaxKeyLength` | ключ не влезает в слот |
+| `!element->payload` | значение не задано |
+| `payloadlength <= 0` | пустое значение (API требует непустое) |
+| `payloadlength > MaxPayloadLength` | значение не влезает в слот |
+
+`!h` стоит первым — иначе `SetLastError((HTHANDLE*)h, ...)` разыменовал бы `nullptr` (внутри он проверяет `h && msg`, но порядок вычисления в C++ не гарантирует защиту при прямом обращении к полям).
+
+#### Шаг 2. Хэш и стартовый слот
+
+```cpp
+int startIndex = HashFunction(element->key, element->keylength, h->Capacity);
+int index = startIndex;
+```
+
+#### Шаг 3. Пробирование: два выхода и две ветки
+
+```cpp
+for (int i = 0; i < h->Capacity; i++)
+{
+    if (IsSlotEmpty(h, index))
+    {
+        // ВЕТКА А: нашли свободный слот → пишем сюда
+    }
+
+    // ВЕТКА Б: слот занят — проверяем, не тот же это ключ
+    ...
+    index = (index + 1) % h->Capacity;
+    if (index == startIndex) break;
+}
+SetLastError((HTHANDLE*)h, "Storage full");
+return FALSE;
+```
+
+Двойная защита от зацикливания:
+
+- `i < h->Capacity` — не больше одного полного круга;
+- `if (index == startIndex) break` — выходим, как только вернулись в начало.
+
+Одного условия мало: первое ограничивает итерации, второе корректно обрабатывает заворот `(index + 1) % Capacity`.
+
+#### Ветка А — запись в свободный слот
+
+```cpp
+size_t offset = GetElementOffset(h, index);
+char* dest = (char*)h->Addr + offset;
+
+memcpy(dest, element->key, element->keylength);
+memset(dest + element->keylength, 0, h->MaxKeyLength - element->keylength);
+
+memcpy(dest + h->MaxKeyLength, element->payload, element->payloadlength);
+memset(dest + h->MaxKeyLength + element->payloadlength, 0, h->MaxPayloadLength - element->payloadlength);
+
+*(int*)(dest + h->MaxKeyLength + h->MaxPayloadLength) = element->keylength;
+*(int*)(dest + h->MaxKeyLength + h->MaxPayloadLength + sizeof(int)) = element->payloadlength;
+
+return TRUE;
+```
+
+Что здесь важно:
+
+- Копируются ровно `keylength` байт, **хвост слота забивается нулями** (`memset`). Это нужно, чтобы старые данные от ранее удалённого элемента не «просвечивали» и чтобы сравнение ключей было предсказуемым.
+- `payload` пишется не в начало слота, а со смещением `+ MaxKeyLength` — слот всегда фиксированной ширины.
+- Длины пишутся **после** данных, в конец слота: `keylength`, затем `payloadlength`.
+- `payload` может быть бинарным (`void*`), поэтому используется `memcpy`, а не `strcpy`.
+
+#### Ветка Б — проверка дубликата
+
+```cpp
+size_t offset = GetElementOffset(h, index);
+char* existing = (char*)h->Addr + offset;
+int existingKeyLength = *(int*)(existing + h->MaxKeyLength + h->MaxPayloadLength);
+
+if (existingKeyLength == element->keylength && memcmp(existing, element->key, element->keylength) == 0)
+{
+    SetLastError((HTHANDLE*)h, "Key already exists");
+    return FALSE;
+}
+```
+
+Два условия, оба обязательны:
+
+- `existingKeyLength == element->keylength` — сравнение длин отсекает почти все ложные совпадения (`"key"` и `"key1"` не равны, хотя первые 3 байта совпадают);
+- `memcmp(...) == 0` — побайтовое сравнение ключа.
+
+**Почему дубликат ищется именно во время пробирования, а не отдельным проходом:** ключ может лежать не в своём «хэш-слоте», а дальше по цепочке — туда его положил другой Insert при коллизии. Полный проход по цепочке и есть поиск.
+
+**Почему пустой слот означает «ключа точно нет»:** в открытой адресации вставка всегда идёт в первый свободный слот от `startIndex`. Если на пути встретился пустой слот — значит, этот ключ никогда не вставлялся, иначе он занял бы именно его. Отсюда: при `IsSlotEmpty` поиск можно прекращать.
+
+#### Шаг 4 — «Storage full»
+
+Цикл дошёл до конца и не нашёл ни свободного слота, ни совпадения → таблица заполнена, вставка невозможна.
+
+---
+
+### Update — изменение значения по ключу
+
+```cpp
+BOOL Update(const HTHANDLE* h, const Element* oldElement, const void* newPayload, int newPayloadLength)
+```
+
+#### Валидация
+
+```cpp
+if (!h || !oldElement || !oldElement->key || oldElement->keylength <= 0 ||
+    !newPayload || newPayloadLength <= 0 || newPayloadLength > h->MaxPayloadLength)
+{
+    SetLastError((HTHANDLE*)h, "Invalid parameters for Update");
+    return FALSE;
+}
+```
+
+Проверяется только **новая** длина значения. Длина ключа не ограничивается сверху — если она больше `MaxKeyLength`, ключ просто не будет найден (сравнение с `existingKeyLength` не совпадёт), и вернётся «Key not found».
+
+#### Поиск элемента
+
+Тот же цикл пробирования: `HashFunction` → пошаговый `(index + 1) % Capacity` → при пустом слоте выход с «Key not found».
+
+#### Запись нового значения
+
+```cpp
+if (existingKeyLength == oldElement->keylength &&
+    memcmp(existing, oldElement->key, oldElement->keylength) == 0)
+{
+    memcpy(existing + h->MaxKeyLength, newPayload, newPayloadLength);
+    memset(existing + h->MaxKeyLength + newPayloadLength, 0,
+           h->MaxPayloadLength - newPayloadLength);
+    *(int*)(existing + h->MaxKeyLength + h->MaxPayloadLength + sizeof(int)) = newPayloadLength;
+    return TRUE;
+}
+```
+
+Четыре отличия от Insert:
+
+| | Insert | Update |
+|---|---|---|
+| Ключ | копируется в слот | **не трогается** |
+| `keylength` | записывается | **не меняется** |
+| `payload` | копируется | перезаписывается |
+| `payloadlength` | записывается | обновляется на новую длину |
+
+**Почему элемент не переносится в другой слот.** Слот определяется хэшем **ключа**, а ключ не изменился — значит, `index` остаётся тем же. Никакого перепробирования и перемещения не нужно: это главное удобство обновления по ключу.
+
+Смена длины значения безопасна, потому что `payload[]` — фиксированный массив `MaxPayloadLength`: новое значение короче — хвост забивается нулями, новое длиннее разрешённого — отсекается валидацией.
+
+---
+
+### Delete — удаление элемента
+
+```cpp
+BOOL Delete(const HTHANDLE* h, const Element* element)
+```
+
+#### Валидация — минимальная
+
+```cpp
+if (!h || !element || !element->key || element->keylength <= 0)
+{
+    SetLastError((HTHANDLE*)h, "Invalid parameters for Delete");
+    return FALSE;
+}
+```
+
+Значение (`payload`) не проверяется и не читается: удаление адресуется только ключом. Поэтому в вызывающем коде используется конструктор `Element(key, keylength)` без payload.
+
+#### Поиск и «удаление»
+
+```cpp
+if (existingKeyLength == element->keylength && memcmp(existing, element->key, element->keylength) == 0)
+{
+    // Ленивое удаление: помечаем слот свободным, не перемещая данные
+    *(int*)(existing + h->MaxKeyLength + h->MaxPayloadLength) = 0;
+    return TRUE;
+}
+```
+
+Удаление **ленивое (lazy)**: обнуляется только `keylength`, а байты ключа и значения остаются в файле. Ничего не сдвигается, свободные слоты не «схлопываются» — иначе пришлось бы перестраивать всю цепочку пробирования.
+
+Почему `keylength = 0` — достаточный признак:
+
+- `IsSlotEmpty` смотрит именно на это поле;
+- нулевая длина не может встретиться у живого элемента (валидация требует `keylength > 0`);
+- `memcmp` при сравнении с живым ключом даст ложное совпадение только если длины равны, а `0 != keylength > 0`.
+
+#### Два следствия, о которых надо знать
+
+**1. Данные остаются в файле.** После Delete значение физически лежит в образе и в файле — читается любым hex-редактором. Если хранилище использовалось для чувствительных данных, нужна затирка (`memset` области payload перед обнулением `keylength`). В текущей реализации её нет.
+
+**2. Цепочка пробирования разрывается.** Пример: ёмкость 7, ключи `A`, `B` дают одинаковый `startIndex = 3`.
+
+```
+было:   [.., A(3), B(4), ..]        B найден: 3 → 4
+Delete(A): [.., --(3), B(4), ..]    B НЕ найден: слот 3 пуст → выход
+```
+
+Поиск останавливается на первом пустом слоте, поэтому `B` становится недостижим, хотя физически лежит в слоте 4. Классическое решение — «надгробия» (tombstones): отдельное значение, помечающее «здесь был элемент, цепочку не рви». В этой реализации tombstones не применяются, и это задокументировано как известное ограничение.
+
+---
+
+### Сводка по трём функциям
+
+| | Insert | Update | Delete |
+|---|---|---|---|
+| Что принимает | ключ + значение | ключ + новое значение | только ключ |
+| Что пишет в слот | всё: ключ, значение, обе длины | только `payload` и `payloadlength` | только `keylength = 0` |
+| Меняет позицию элемента | да (новый слот) | нет (тот же слот) | нет |
+| Основная ошибка | «Key already exists» / «Storage full» | «Key not found» | «Key not found» |
+| Сложность (средняя) | O(1) | O(1) | O(1) |
+| Сложность (худшая) | O(Capacity) | O(Capacity) | O(Capacity) |
+
+Средняя O(1) — при коэффициенте заполнения α = count / Capacity заметно меньше 1. Худшая O(Capacity) — когда все ключи коллизируют и таблица почти заполнена.
 
 ---
 

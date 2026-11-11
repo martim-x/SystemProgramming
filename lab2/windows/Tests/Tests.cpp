@@ -388,6 +388,8 @@ void TestAsyncSnapshot()
 	HT::Close(ht);
 }
 
+void RunParameterizedTests();
+
 int main()
 {
 	printf("=== OS10 HT API Test Suite ===\n");
@@ -403,6 +405,7 @@ int main()
 	TestMaxSizes();
 	TestThreadSafety();
 	TestAsyncSnapshot();
+	RunParameterizedTests();
 
 	printf("\n=== Summary ===\n");
 	printf("Passed: %d\n", passed);

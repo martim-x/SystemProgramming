@@ -79,6 +79,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Tests.cpp" />
+    <ClCompile Include="ParameterizedTests.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\OS10_HTAPI\OS10_HTAPI.vcxproj">

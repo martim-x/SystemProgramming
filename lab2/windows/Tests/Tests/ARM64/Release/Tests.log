@@ -1,0 +1,5 @@
+﻿cl : командная строка  warning D9025: переопределение "/Oi" на "/Oi-"
+  Tests.cpp
+  ParameterizedTests.cpp
+  Создание кода...
+  Tests.vcxproj -> C:\Users\User-6d4ec851\Documents\VisualStudioCodeRepos\SystemProgramming\lab2\windows\Tests\Tests\ARM64\Release\Tests.exe

@@ -1,0 +1,3 @@
+﻿cl : командная строка  warning D9025: переопределение "/Oi" на "/Oi-"
+  HT.cpp
+  OS10_HTAPI.vcxproj -> C:\Users\User-6d4ec851\Documents\VisualStudioCodeRepos\SystemProgramming\lab2\windows\OS10_HTAPI\OS10_HTAPI\ARM64\Release\OS10_HTAPI.lib
